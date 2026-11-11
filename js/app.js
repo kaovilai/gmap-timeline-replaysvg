@@ -6,6 +6,7 @@
 import { buildPalette, createGifWriter, indexFrame } from "./gif.js";
 import {
   arcPoints,
+  buildFlatScene,
   buildPlaces,
   cameraAt,
   CityIndex,
@@ -259,13 +260,13 @@ async function generate(file) {
     places.cities,
     state.land,
     "light",
-    { borders: state.borders },
+    { borders: state.borders, duration: loopSeconds() },
   );
   const svgAnimatedDark = renderAnimatedSvg(
     places.cities,
     state.land,
     "dark",
-    { borders: state.borders },
+    { borders: state.borders, duration: loopSeconds() },
   );
 
   state.places = places;
@@ -501,29 +502,38 @@ function drawGlobe(now) {
 }
 
 async function exportGif() {
-  if (!state.places || !state.globe.segments) return;
+  if (!state.places) return;
+  const mode = state.mode;
+  if (mode === "globe" && !state.globe.segments) return;
   const width = Number($("gif-width").value) || 480;
   const requestedFps = Number($("gif-fps").value) || 12;
   // GIF stores hundredths of a second; below 2 cs browsers clamp to 10 fps.
   const fps = Math.min(50, requestedFps);
-  const duration = Number($("gif-duration").value) || 16;
+  const duration = loopSeconds();
   const colors = Number($("gif-colors").value) || 256;
   const dither = $("gif-dither").checked;
   const perDirection = Math.max(2, Math.round((fps * duration) / 2));
-  const height = Math.round(width * 1.05);
   const supersample = 2;
-  const big = document.createElement("canvas");
-  big.width = width * supersample;
-  big.height = height * supersample;
-  const bigCtx = big.getContext("2d");
-  const small = document.createElement("canvas");
-  small.width = width;
-  small.height = height;
-  const smallCtx = small.getContext("2d");
+  const big = frameDimensions(mode, width * supersample);
+  const small = frameDimensions(mode, width);
+  const height = small.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = big.width;
+  canvas.height = big.height;
+  const bigCtx = canvas.getContext("2d");
+  const smallCanvas = document.createElement("canvas");
+  smallCanvas.width = small.width;
+  smallCanvas.height = small.height;
+  const smallCtx = smallCanvas.getContext("2d");
+  const renderFrame = makeFrameRenderer(
+    mode,
+    big.width,
+    big.height,
+    themeForPreview(),
+  );
   const button = $("gif-export");
   const status = $("gif-status");
   const progressEl = $("gif-progress");
-  const theme = THEMES[themeForPreview()];
   button.disabled = true;
   progressEl.hidden = false;
   progressEl.value = 0;
@@ -533,22 +543,11 @@ async function exportGif() {
   try {
     for (let index = 0; index < perDirection; index += 1) {
       const progress = perDirection > 1 ? index / (perDirection - 1) : 0;
-      const camera =
-        cameraAt(state.globe.segments, state.globe.total, progress) ?? [0, 20];
-      const point = routePointAt(state.globe.segments, state.globe.total, progress);
       bigCtx.setTransform(1, 0, 0, 1, 0, 0);
-      drawGlobeScene(
-        bigCtx,
-        big.width,
-        big.height,
-        camera[0],
-        camera[1],
-        state.places.cities,
-        { comet: point, theme },
-      );
-      smallCtx.clearRect(0, 0, width, height);
-      smallCtx.drawImage(big, 0, 0, width, height);
-      const rgba = smallCtx.getImageData(0, 0, width, height).data;
+      renderFrame(bigCtx, progress);
+      smallCtx.clearRect(0, 0, small.width, small.height);
+      smallCtx.drawImage(canvas, 0, 0, small.width, small.height);
+      const rgba = smallCtx.getImageData(0, 0, small.width, small.height).data;
       if (!palette) palette = buildPalette(rgba, colors);
       forward.push(indexFrame(rgba, palette, cache, { dither, width }));
       status.textContent =
@@ -560,7 +559,7 @@ async function exportGif() {
     status.textContent = "Encoding GIF…";
     await new Promise((resolve) => setTimeout(resolve, 0));
     const writer = createGifWriter({
-      width,
+      width: small.width,
       height,
       palette,
       delayMs: 1000 / fps,
@@ -574,11 +573,11 @@ async function exportGif() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `worldmap-globe-${width}-${fps}fps.gif`;
+    link.download = `worldmap-${mode}-${width}-${fps}fps.gif`;
     link.click();
     status.textContent =
       `GIF ready · ${(blob.size / 1048576).toFixed(1)} MB · ` +
-      `${forward.length * 2 - 1} frames · ${fps} fps`;
+      `${forward.length * 2 - 1} frames · ${fps} fps · ${duration}s`;
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (error) {
     status.textContent = `GIF failed: ${error.message}`;
@@ -587,6 +586,97 @@ async function exportGif() {
     progressEl.hidden = true;
     progressEl.value = 0;
   }
+}
+
+function loopSeconds() {
+  return Number($("duration").value) || 90;
+}
+
+function prepareFlatScene(width) {
+  const scene = buildFlatScene(state.places.cities, state.land, {
+    borders: state.borders,
+    width,
+  });
+  return {
+    ...scene,
+    land: scene.landPath ? new Path2D(scene.landPath) : null,
+    border: scene.borderPath ? new Path2D(scene.borderPath) : null,
+    route: scene.routePath ? new Path2D(scene.routePath) : null,
+  };
+}
+
+function drawFlatSceneFrame(ctx, width, height, scene, themeName, progress) {
+  const theme = THEMES[themeName];
+  const scale = width / scene.width;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.fillStyle = theme.ocean;
+  ctx.fillRect(0, 0, scene.width, scene.height);
+  if (scene.land) {
+    ctx.fillStyle = theme.land;
+    ctx.fill(scene.land, "evenodd");
+    ctx.strokeStyle = theme.coast;
+    ctx.lineWidth = 0.7;
+    ctx.stroke(scene.land);
+  }
+  if (scene.border) {
+    ctx.strokeStyle = theme.border;
+    ctx.lineWidth = 0.6;
+    ctx.stroke(scene.border);
+  }
+  if (scene.route) {
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = theme.glow;
+    ctx.lineWidth = 1.2;
+    ctx.stroke(scene.route);
+    ctx.globalAlpha = 1;
+  }
+  for (const [x, y] of scene.dots) {
+    ctx.beginPath();
+    ctx.arc(x, y, 4.2, 0, Math.PI * 2);
+    ctx.fillStyle = theme.dot;
+    ctx.fill();
+    ctx.strokeStyle = theme.dot_edge;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  const point = routePointAt(scene.segments, scene.total, progress);
+  if (point) {
+    const [x, y] = scene.projection.point(point[0], point[1]);
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fillStyle = theme.halo;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, 4.2, 0, Math.PI * 2);
+    ctx.fillStyle = theme.glow;
+    ctx.fill();
+  }
+}
+
+/** A draw(ctx, progress) closure for the mode that is currently shown. */
+function makeFrameRenderer(mode, width, height, themeName) {
+  if (mode === "flat") {
+    const scene = prepareFlatScene(width);
+    return (ctx, progress) =>
+      drawFlatSceneFrame(ctx, width, height, scene, themeName, progress);
+  }
+  return (ctx, progress) => {
+    const camera =
+      cameraAt(state.globe.segments, state.globe.total, progress) ?? [0, 20];
+    const point = routePointAt(state.globe.segments, state.globe.total, progress);
+    drawGlobeScene(ctx, width, height, camera[0], camera[1], state.places.cities, {
+      comet: point,
+      theme: THEMES[themeName],
+    });
+  };
+}
+
+function frameDimensions(mode, width) {
+  if (mode === "flat") {
+    const scene = buildFlatScene(state.places.cities, state.land, { width });
+    return { width, height: Math.round(scene.height) };
+  }
+  return { width, height: Math.round(width * 1.05) };
 }
 
 function pickVideoMime() {
@@ -604,7 +694,9 @@ function pickVideoMime() {
 }
 
 async function exportVideo() {
-  if (!state.places || !state.globe.segments) return;
+  if (!state.places) return;
+  const mode = state.mode;
+  if (mode === "globe" && !state.globe.segments) return;
   const mime = pickVideoMime();
   const button = $("video-export");
   const status = $("video-status");
@@ -612,13 +704,18 @@ async function exportVideo() {
     status.textContent = "This browser cannot record video; use the GIF export.";
     return;
   }
-  const width = Number($("video-width").value) || 1080;
-  const height = Math.round(width * 1.05);
+  const dims = frameDimensions(mode, Number($("video-width").value) || 1080);
+  const total = loopSeconds();
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = dims.width;
+  canvas.height = dims.height;
   const ctx = canvas.getContext("2d");
-  const theme = THEMES[themeForPreview()];
+  const renderFrame = makeFrameRenderer(
+    mode,
+    dims.width,
+    dims.height,
+    themeForPreview(),
+  );
 
   let stream;
   try {
@@ -641,20 +738,13 @@ async function exportVideo() {
 
   button.disabled = true;
   recorder.start(250);
-  const total = 16;
   const start = performance.now();
   await new Promise((resolve) => {
     function tick(now) {
       const elapsed = Math.min(total, (now - start) / 1000);
       const phase = (elapsed % (total * 2)) / total;
       const progress = phase <= 1 ? phase : 2 - phase;
-      const camera =
-        cameraAt(state.globe.segments, state.globe.total, progress) ?? [0, 20];
-      const point = routePointAt(state.globe.segments, state.globe.total, progress);
-      drawGlobeScene(ctx, width, height, camera[0], camera[1], state.places.cities, {
-        comet: point,
-        theme,
-      });
+      renderFrame(ctx, progress);
       status.textContent = `Recording ${elapsed.toFixed(1)}s / ${total}s…`;
       if (elapsed >= total) {
         resolve();
@@ -671,7 +761,7 @@ async function exportVideo() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `worldmap-globe-${width}-60fps.webm`;
+  link.download = `worldmap-${mode}-${dims.width}.webm`;
   link.click();
   status.textContent =
     `Video ready · ${(blob.size / 1048576).toFixed(1)} MB · ${mime.split(";")[0]}`;
@@ -726,6 +816,10 @@ function setMode(mode) {
   }
   $("flat-preview").hidden = mode !== "flat";
   $("globe-preview").hidden = mode !== "globe";
+  $("export-scope").textContent =
+    mode === "flat"
+      ? "Exports the flat map over the loop length set above."
+      : "Exports the globe over the loop length set above.";
   if (mode === "globe") {
     startGlobe();
     drawGlobe(performance.now());
@@ -777,15 +871,17 @@ $("theme").addEventListener("change", () => {
   if (state.places) showPreview();
 });
 
-$("dates").addEventListener("change", async () => {
-  if (!state.file) return;
-  try {
-    await generate(state.file);
-  } catch (error) {
-    console.error(error);
-    setStatus(error.message || String(error), true);
-  }
-});
+for (const id of ["dates", "duration"]) {
+  $(id).addEventListener("change", async () => {
+    if (!state.file) return;
+    try {
+      await generate(state.file);
+    } catch (error) {
+      console.error(error);
+      setStatus(error.message || String(error), true);
+    }
+  });
+}
 
 $("snippet").textContent = SNIPPET;
 $("copy").addEventListener("click", async () => {
@@ -866,13 +962,13 @@ for (const event of ["pointerup", "pointercancel"]) {
 
 const SETTING_IDS = [
   "theme",
+  "dates",
+  "duration",
   "gif-width",
   "gif-fps",
-  "gif-duration",
   "gif-colors",
   "gif-dither",
   "video-width",
-  "dates",
 ];
 const SETTINGS_KEY = "gmap-settings";
 

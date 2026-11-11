@@ -689,6 +689,25 @@ function svgOpen(width, height, title, description) {
   );
 }
 
+/** Geometry for drawing the flat map on a canvas, built once per size. */
+export function buildFlatScene(cities, land, options = {}) {
+  const width = options.width ?? 1280;
+  const projection = new Projection(width);
+  const ordered = routeOrder(cities);
+  const { segments, total } = routeSegments(ordered);
+  return {
+    width,
+    height: projection.height,
+    projection,
+    landPath: landPaths(land, projection).join(" "),
+    borderPath: linesPath(options.borders ?? [], projection),
+    routePath: linesPath(routeLines(ordered), projection),
+    dots: ordered.map((city) => projection.point(city.lat, city.lon)),
+    segments,
+    total,
+  };
+}
+
 export function renderSvg(cities, land, themeName = "light", options = {}) {
   const theme = THEMES[themeName];
   const width = options.width ?? 1280;

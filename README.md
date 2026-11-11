@@ -35,9 +35,11 @@ Open **https://github.tig.pw/gmap-timeline-replaysvg/**
 2. Tap **Choose Timeline export** and pick it. Parsing and drawing happen in the
    browser; the file never leaves the device.
 3. Switch between **Flat map** and **Globe** to preview both; the globe is
-   interactive (drag to spin). Download any of the SVGs, or **Download GIF** to
-   render an animated GIF of the globe in the browser — the encoder is bundled,
-   so no upload and no dependencies. Everything lands in Files.
+   interactive (drag to spin). Download any of the SVGs, or use **Export an
+   animation** to render the *currently previewed* map (flat or globe) as a
+   GIF or a 60 fps video — the encoder is bundled, so no upload and no
+   dependencies. One **Loop length** control sets the duration for all three:
+   the animated SVG, the GIF and the video. Everything lands in Files.
 4. Upload them to your profile repo from GitHub's mobile site, then paste the
    README snippet the page gives you.
 
@@ -275,9 +277,11 @@ Practical long loops drop to 25 fps and 128 colours (~61 MB raw), then
 the profile-README workflow does.
 
 The browser page does the same thing without Pillow: `js/gif.js` is a small
-GIF89a encoder (median-cut palette, LZW, animation) that renders the globe from
-the canvas, so you can produce a GIF on the phone with no upload. Pick the
-width, fps (up to 50), length, colour count and dithering on the page.
+GIF89a encoder (median-cut palette, LZW, animation) that renders either map
+from a canvas, so you can produce a GIF on the phone with no upload. Pick the
+width, fps (up to 50), colour count and dithering on the page; the loop length
+comes from the page's single duration control, which also sets the animated
+SVG's cycle and the video length.
 
 ## Basemap data
 
