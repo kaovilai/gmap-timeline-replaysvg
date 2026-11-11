@@ -360,6 +360,29 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("@keyframes leg0", svg)
 
 
+class GifTests(unittest.TestCase):
+    def test_gif_export_ping_pongs(self):
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            self.skipTest("Pillow not installed")
+        cities = WM._read_places(DATA)["cities"]
+        land = WM.load_land_coarse()
+        frames = WM.render_globe_gif(
+            cities,
+            land,
+            "dark",
+            width=120,
+            fps=4,
+            duration=4,
+            borders=WM.load_borders(),
+        )
+        # 8 frames forward + 6 back (endpoints not repeated).
+        self.assertEqual(len(frames), 14)
+        self.assertEqual(frames[0].size, (120, 126))
+        self.assertEqual(frames[0].mode, "P")
+
+
 class CommittedArtifactTests(unittest.TestCase):
     def test_places_json_schema(self):
         if not DATA.exists():

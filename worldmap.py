@@ -765,8 +765,8 @@ def _route_segments(cities):
     return segments, total
 
 
-def _camera_at(segments, total, progress):
-    """Camera rotation for a point along the route, so the globe follows it."""
+def _route_point_at(segments, total, progress):
+    """Interpolated (lat, lon) at a fraction of the route's total length."""
     if not segments or total <= 0:
         return None
     target = progress * total
@@ -775,10 +775,18 @@ def _camera_at(segments, total, progress):
         if target <= distance or last:
             fraction = min(1.0, target / distance) if distance else 0.0
             step = int(fraction * (len(points) - 1) + 0.5)
-            lat, lon = points[min(len(points) - 1, step)]
-            return lon, max(-38.0, min(38.0, lat))
+            return points[min(len(points) - 1, step)]
         target -= distance
     return None
+
+
+def _camera_at(segments, total, progress):
+    """Camera rotation for a point along the route, so the globe follows it."""
+    point = _route_point_at(segments, total, progress)
+    if point is None:
+        return None
+    lat, lon = point
+    return lon, max(-38.0, min(38.0, lat))
 
 
 def _route_order(cities):
@@ -1273,6 +1281,126 @@ def render_globe_svg(
     )
 
 
+def render_globe_gif(
+    cities,
+    land,
+    theme_name="dark",
+    width=720,
+    fps=12.0,
+    duration=24.0,
+    borders=None,
+    supersample=2,
+    colors=128,
+):
+    """Write a ping-pong animated GIF of the following globe.
+
+    Pillow is optional: only this command needs it. Frames are drawn with the
+    same projection as the SVG globe, supersampled for antialiasing, and the
+    loop plays the route forward then backward.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as exc:  # pragma: no cover - depends on the environment
+        raise SystemExit(
+            "GIF export needs Pillow: python3 -m pip install pillow"
+        ) from exc
+
+    theme = THEMES[theme_name]
+    scale = max(1, int(supersample))
+    out_width = int(width)
+    out_height = int(round(out_width * 1.05))
+    box_width = out_width * scale
+    box_height = out_height * scale
+    radius = box_width * 0.44
+    cx = box_width / 2.0
+    cy = box_height / 2.0
+    background = (246, 244, 239) if theme_name == "light" else (11, 26, 42)
+    dot_radius = 3.2 * (out_width / 640.0) * scale
+
+    ordered = _route_order(cities)
+    segments, total = _route_segments(ordered)
+    route_lines = _route_lines(ordered)
+    per_direction = max(2, int(round(fps * duration / 2.0)))
+    mask = Image.new("L", (box_width, box_height), 0)
+    ImageDraw.Draw(mask).ellipse(
+        [cx - radius, cy - radius, cx + radius, cy + radius], fill=255
+    )
+
+    def render_frame(progress):
+        point = _route_point_at(segments, total, progress)
+        camera = _camera_at(segments, total, progress)
+        lon0, lat0 = camera if camera else (0.0, GLOBE_TILT)
+
+        globe = Image.new("RGB", (box_width, box_height), theme["ocean_hi"])
+        draw = ImageDraw.Draw(globe)
+        for polygon in land["coordinates"]:
+            for ring_index, ring in enumerate(polygon):
+                colour = (
+                    theme.get("globe_land", theme["land"])
+                    if ring_index == 0
+                    else theme["ocean_hi"]
+                )
+                for run in _globe_ring(ring, lon0, lat0, radius, cx, cy):
+                    if len(run) >= 3:
+                        draw.polygon([(x, y) for x, y in run], fill=colour)
+
+        line_width = max(1, scale)
+        for line in borders or []:
+            for run in _globe_line(line, lon0, lat0, radius, cx, cy):
+                if len(run) >= 2:
+                    draw.line([(x, y) for x, y in run], fill=theme["border"], width=line_width)
+        for line in route_lines:
+            for run in _globe_line(line, lon0, lat0, radius, cx, cy):
+                if len(run) >= 2:
+                    draw.line([(x, y) for x, y in run], fill=theme["glow"], width=line_width)
+
+        for city in cities:
+            x, y, z = _sphere_point(city["lat"], city["lon"], lon0, lat0)
+            if z > 0:
+                px, py = cx + radius * x, cy - radius * y
+                draw.ellipse(
+                    [px - dot_radius, py - dot_radius, px + dot_radius, py + dot_radius],
+                    fill=theme["dot"],
+                    outline=theme["dot_edge"],
+                    width=max(1, scale),
+                )
+
+        if point is not None:
+            lat, lon = point
+            x, y, z = _sphere_point(lat, lon, lon0, lat0)
+            if z > 0:
+                px, py = cx + radius * x, cy - radius * y
+                glow = dot_radius * 2.6
+                draw.ellipse(
+                    [px - glow, py - glow, px + glow, py + glow],
+                    fill=theme["halo"],
+                )
+                draw.ellipse(
+                    [px - dot_radius, py - dot_radius, px + dot_radius, py + dot_radius],
+                    fill=theme["glow"],
+                )
+
+        frame = Image.new("RGB", (box_width, box_height), background)
+        frame.paste(globe, (0, 0), mask)
+        ImageDraw.Draw(frame).ellipse(
+            [cx - radius, cy - radius, cx + radius, cy + radius],
+            outline=theme["coast"],
+            width=max(1, scale),
+        )
+        return frame.resize((out_width, out_height), Image.LANCZOS)
+
+    # One shared palette across frames keeps GIF delta compression effective.
+    first = render_frame(0.0)
+    palette = first.quantize(colors=colors, method=Image.MEDIANCUT)
+    forward = [first.quantize(palette=palette, dither=Image.NONE)] + [
+        render_frame(index / (per_direction - 1)).quantize(
+            palette=palette, dither=Image.NONE
+        )
+        for index in range(1, per_direction)
+    ]
+    return forward + forward[-2:0:-1]
+
+
 def _read_places(path):
     with pathlib.Path(path).open(encoding="utf-8") as handle:
         document = json.load(handle)
@@ -1345,13 +1473,16 @@ def command_render(args):
                 file=sys.stderr,
             )
         if args.globe:
+            frames = args.globe_frames
+            if getattr(args, "globe_fps", None):
+                frames = max(2, int(round(args.globe_fps * args.globe_duration / 2.0)))
             globe = render_globe_svg(
                 cities,
                 coarse,
                 theme,
                 width=args.globe_width,
                 borders=borders,
-                frames=args.globe_frames,
+                frames=frames,
                 duration=args.globe_duration,
             )
             out = out_dir / f"worldmap-globe-{theme}.svg"
@@ -1360,6 +1491,39 @@ def command_render(args):
                 f"wrote {out} ({len(cities)} cities, {len(globe)} bytes)",
                 file=sys.stderr,
             )
+    return 0
+
+
+def command_gif(args):
+    document = _read_places(args.data)
+    cities = document["cities"]
+    land = load_land_coarse()
+    borders = load_borders()
+    frames = render_globe_gif(
+        cities,
+        land,
+        args.theme,
+        width=args.width,
+        fps=args.fps,
+        duration=args.duration,
+        borders=borders,
+        supersample=args.supersample,
+        colors=args.colors,
+    )
+    out = pathlib.Path(args.out)
+    frames[0].save(
+        out,
+        save_all=True,
+        append_images=frames[1:],
+        duration=max(20, int(round(1000.0 / args.fps))),
+        loop=0,
+        optimize=True,
+        disposal=2,
+    )
+    print(
+        "wrote %s (%d frames, %d bytes)" % (out, len(frames), out.stat().st_size),
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -1439,6 +1603,11 @@ def build_parser():
         p.add_argument("--globe-width", type=int, default=640)
         p.add_argument("--globe-frames", type=int, default=24)
         p.add_argument("--globe-duration", type=float, default=24.0)
+        p.add_argument(
+            "--globe-fps",
+            type=float,
+            help="derive globe frames from this fps and --globe-duration",
+        )
 
     p_import = sub.add_parser("import", help="export -> data/places.json (PII-stripped)")
     import_options(p_import)
@@ -1447,6 +1616,21 @@ def build_parser():
     p_render = sub.add_parser("render", help="data/places.json -> worldmap-*.svg")
     render_options(p_render)
     p_render.set_defaults(func=command_render)
+
+    p_gif = sub.add_parser("gif", help="places.json -> animated GIF of the globe")
+    p_gif.add_argument(
+        "data", nargs="?", default=str(DEFAULT_DATA), help="city-level JSON to draw"
+    )
+    p_gif.add_argument("--out", default="worldmap-globe.gif")
+    p_gif.add_argument("--width", type=int, default=720, help="output width in px")
+    p_gif.add_argument("--fps", type=float, default=12.0)
+    p_gif.add_argument(
+        "--duration", type=float, default=24.0, help="seconds per forward+back cycle"
+    )
+    p_gif.add_argument("--theme", choices=["light", "dark"], default="dark")
+    p_gif.add_argument("--supersample", type=int, default=2)
+    p_gif.add_argument("--colors", type=int, default=128, help="GIF palette size")
+    p_gif.set_defaults(func=command_gif)
 
     p_all = sub.add_parser("all", help="import then render")
     import_options(p_all)
@@ -1483,6 +1667,11 @@ def build_parser():
     p_all.add_argument("--globe-width", type=int, default=640)
     p_all.add_argument("--globe-frames", type=int, default=24)
     p_all.add_argument("--globe-duration", type=float, default=24.0)
+    p_all.add_argument(
+            "--globe-fps",
+            type=float,
+            help="derive globe frames from this fps and --globe-duration",
+        )
     p_all.set_defaults(func=command_all)
     return parser
 

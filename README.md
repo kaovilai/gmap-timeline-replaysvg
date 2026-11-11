@@ -135,12 +135,33 @@ are dropped; position/path samples use the tighter `--max-path-km` (default
 - Output is deterministic: the same `places.json` renders byte-identical SVGs.
 
 The drift variant tiles the map twice so the pan has no seam. The globe bakes
-24 frames into a single SVG, each frame sampled along the route so the camera
-follows the moving point and keeps the dots in view (latitude is clamped to
-±38° so the poles never distort); the frames play forward, then backward, so the
-loop returns to the first city without a jump. A README image cannot run
-scripts, so the motion has to be pre-rendered. At 640 px the globe file is about
-630 kB; lower `--globe-frames` or `--globe-width` to shrink it.
+frames into a single SVG, each sampled along the route so the camera follows the
+moving point and keeps the dots in view (latitude is clamped to ±38° so the
+poles never distort); the frames play forward, then backward, so the loop
+returns to the first city without a jump. A README image cannot run scripts, so
+the motion has to be pre-rendered.
+
+### Globe smoothness (FPS)
+
+Playback is `frames / (duration / 2)` frames per second, because half the cycle
+is the return trip. Each frame repeats the coastline, so file size grows almost
+linearly — roughly 26 kB per frame at 640 px. `--globe-fps` derives the frame
+count for you:
+
+```sh
+python3 -I -B worldmap.py render places.json --globe-fps 10 --globe-duration 24
+```
+
+| Target | Frames | Approx. SVG size (640 px) |
+| --- | --- | --- |
+| 2 fps (default) | 24 | 630 kB |
+| 6 fps | 72 | 1.9 MB |
+| 10 fps | 120 | 3.1 MB |
+| 15 fps | 180 | 4.7 MB |
+
+Half the width roughly halves the bytes: 320 px at 15 fps is ~2.3 MB. For motion
+that actually looks smooth, prefer the GIF export below or the live browser
+globe (60 fps).
 
 Tuning: `--duration 120` slows the animated cycle (default 90 s), `--no-animated`,
 `--no-drift` and `--no-globe` skip variants, `--theme dark` renders one theme.
@@ -174,7 +195,31 @@ python3 -I -B worldmap.py all ~/Downloads/Timeline.json
 | `--no-globe` | off | skip globe variants |
 | `--globe-width` | `640` | globe SVG width |
 | `--globe-frames` | `24` | baked rotation frames |
+| `--globe-fps` | off | derive frames from fps and `--globe-duration` |
 | `--globe-duration` | `24` | seconds per forward-and-back globe cycle |
+
+## GIF export
+
+For sharing outside a README (Slack, a blog, a slide), render the same
+route-following globe to a high-resolution GIF:
+
+```sh
+python3 -m pip install pillow   # only the GIF command needs it
+python3 -I -B worldmap.py gif places.json --out travel.gif \
+  --width 1080 --fps 20 --duration 24 --theme dark
+```
+
+- `--width` is the output width; frames are supersampled 2× before downscaling,
+  so 1080 is crisp on retina screens (`--supersample` to change).
+- `--fps` sets the playback rate; frames = `fps × duration / 2` forward, then
+  reversed for a seamless loop.
+- `--colors` (default 128) trades palette size for file size; flat map colours
+  survive 64 colours well.
+- 640 px / 12 fps / 24 s produces 286 frames and a ~6.7 MB GIF in about six
+  seconds. 1080 px / 20 fps is around 30 MB.
+
+The GIF uses the same palette across frames so delta compression stays
+effective; dithering is off, which keeps flat colours clean and the file small.
 
 ## Basemap data
 
