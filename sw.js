@@ -8,7 +8,7 @@
  * "update available" toast via skipWaiting + controllerchange.
  */
 
-const CACHE = "timeline-replay-v1";
+const CACHE = "timeline-replay-v2";
 const CORE = [
   "./",
   "./index.html",
@@ -51,7 +51,10 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    fetch(request)
+    // "reload" makes the request bypass the browser HTTP cache and revalidate
+    // at the origin, so a deploy is picked up on the very next load instead of
+    // waiting out GitHub Pages' max-age (10 minutes).
+    fetch(request, { cache: "reload" })
       .then((response) => {
         if (response.ok) {
           const copy = response.clone();
