@@ -332,6 +332,10 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(len(list(root.iter(NS + "circle"))) >= len(self.cities), True)
         self.assertIn("@keyframes g0", svg)
         self.assertIn("prefers-reduced-motion", svg)
+        # Each frame shows twice (forward and backward) so the route ping-pongs.
+        self.assertGreaterEqual(svg.count("{opacity:1}"), 2 * 24)
+        frame_zero = svg.split('class="gf gf0"', 1)[1].split("</g>", 1)[0]
+        self.assertIn("<circle", frame_zero)
         self.assertNotIn("<script", svg.lower())
         self.assertEqual(
             svg,
