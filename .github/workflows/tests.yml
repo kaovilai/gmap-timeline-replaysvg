@@ -23,3 +23,5 @@ jobs:
         run: node tests/parity.mjs
       - name: Check the GIF encoder round-trips
         run: node tests/gif.mjs
+      - name: Check the PWA manifest and service worker
+        run: node tests/pwa.mjs

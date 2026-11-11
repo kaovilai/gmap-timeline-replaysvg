@@ -41,6 +41,12 @@ Open **https://github.tig.pw/gmap-timeline-replaysvg/**
 4. Upload them to your profile repo from GitHub's mobile site, then paste the
    README snippet the page gives you.
 
+The page is a PWA: **Add to Home Screen** on a phone (or **Install app** on
+desktop) gives it an icon, a standalone window and offline use after the first
+visit. Updates need no action: assets are fetched network-first, so the next
+load picks up newly posted files, and if a new service worker lands while the
+app is open a banner offers a one-tap reload.
+
 The page uses the same JavaScript renderer that is verified byte-for-byte
 against the Python CLI in CI (`tests/parity.mjs`), so a map produced on the
 phone is identical to one produced on a laptop.
@@ -255,7 +261,9 @@ the animated/globe files being self-contained, and staleness between
 
 `node tests/parity.mjs` renders all eight examples with the browser module and
 asserts the bytes match the Python CLI, so a map made on the phone is identical
-to one made on a laptop. CI runs both suites on every push.
+to one made on a laptop. `node tests/pwa.mjs` checks that every path the service
+worker precaches exists and that the manifest icons resolve, so an installable
+build cannot silently break. CI runs all three suites on every push.
 
 ## License
 

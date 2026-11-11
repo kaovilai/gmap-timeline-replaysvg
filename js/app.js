@@ -174,6 +174,9 @@ function addDownload(name, text, label, type = "image/svg+xml") {
   const url = URL.createObjectURL(blob);
   state.urls.push(url);
   const li = document.createElement("li");
+  const chip = document.createElement("span");
+  chip.className = "chip";
+  chip.textContent = name.split(".").pop().toUpperCase();
   const left = document.createElement("span");
   left.className = "name";
   left.textContent = name;
@@ -184,7 +187,7 @@ function addDownload(name, text, label, type = "image/svg+xml") {
   link.href = url;
   link.download = name;
   link.textContent = label || "Download";
-  li.append(left, size, link);
+  li.append(chip, left, size, link);
   $("downloads").append(li);
 }
 
@@ -495,8 +498,11 @@ async function exportGif() {
   const smallCtx = small.getContext("2d");
   const button = $("gif-export");
   const status = $("gif-status");
+  const progressEl = $("gif-progress");
   const theme = THEMES[themeForPreview()];
   button.disabled = true;
+  progressEl.hidden = false;
+  progressEl.value = 0;
   let palette = null;
   const cache = new Map();
   const forward = [];
@@ -524,6 +530,7 @@ async function exportGif() {
       status.textContent =
         `Rendering ${index + 1}/${perDirection}…` +
         (requestedFps > 50 ? " (GIF caps at 50 fps)" : "");
+      progressEl.value = (index + 1) / perDirection;
       if (index % 3 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     }
     status.textContent = "Encoding GIF…";
@@ -553,6 +560,8 @@ async function exportGif() {
     status.textContent = `GIF failed: ${error.message}`;
   } finally {
     button.disabled = false;
+    progressEl.hidden = true;
+    progressEl.value = 0;
   }
 }
 
@@ -812,6 +821,107 @@ for (const event of ["pointerup", "pointercancel"]) {
     state.globe.lastInteraction = performance.now();
   });
 }
+
+// ---------------------------------------------------------------------------
+// Preferences: control values only, never travel data.
+
+const SETTING_IDS = [
+  "theme",
+  "gif-width",
+  "gif-fps",
+  "gif-duration",
+  "gif-colors",
+  "gif-dither",
+  "video-width",
+];
+const SETTINGS_KEY = "gmap-settings";
+
+function loadSettings() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch {
+    return;
+  }
+  for (const id of SETTING_IDS) {
+    const el = $(id);
+    if (!el || !(id in saved)) continue;
+    if (el.type === "checkbox") el.checked = Boolean(saved[id]);
+    else el.value = saved[id];
+  }
+}
+
+function saveSettings() {
+  const out = {};
+  for (const id of SETTING_IDS) {
+    const el = $(id);
+    if (!el) continue;
+    out[id] = el.type === "checkbox" ? el.checked : el.value;
+  }
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(out));
+  } catch {
+    // Private mode can refuse writes; preferences just stay per-visit.
+  }
+}
+
+document.addEventListener("change", (event) => {
+  const id = event.target && event.target.id;
+  if (id && SETTING_IDS.includes(id)) saveSettings();
+});
+loadSettings();
+
+// ---------------------------------------------------------------------------
+// PWA: install prompt, service worker, and an update banner.
+
+function setupPwa() {
+  const install = $("install");
+  let installEvent = null;
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    installEvent = event;
+    install.hidden = false;
+  });
+  install.addEventListener("click", async () => {
+    if (!installEvent) return;
+    installEvent.prompt();
+    const choice = await installEvent.userChoice.catch(() => null);
+    if (choice && choice.outcome === "accepted") install.hidden = true;
+    installEvent = null;
+  });
+  window.addEventListener("appinstalled", () => {
+    install.hidden = true;
+  });
+
+  if (!("serviceWorker" in navigator)) return;
+  const toast = $("update-toast");
+  $("update-dismiss").addEventListener("click", () => {
+    toast.hidden = true;
+  });
+  $("update-reload").addEventListener("click", () => location.reload());
+  navigator.serviceWorker
+    .register("./sw.js")
+    .then((registration) => {
+      registration.addEventListener("updatefound", () => {
+        const next = registration.installing;
+        if (!next) return;
+        next.addEventListener("statechange", () => {
+          // Only announce once the page itself is controlled; the first
+          // install also reaches "installed" and must stay quiet.
+          if (next.state === "installed" && navigator.serviceWorker.controller) {
+            toast.hidden = false;
+          }
+        });
+      });
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) registration.update().catch(() => {});
+      });
+    })
+    .catch(() => {
+      // No service worker (file:// or an old browser): the app still works.
+    });
+}
+setupPwa();
 
 // Warm the basemap data so the first run feels instant.
 loadData().catch(() => {
