@@ -811,36 +811,39 @@ export function renderGlobeSvg(cities, land, themeName = "dark", options = {}) {
   const width = options.width ?? 640;
   const borders = options.borders ?? [];
   const frames = options.frames ?? 24;
-  const duration = options.duration ?? 18;
+  const duration = options.duration ?? 24;
   const height = round2(width * 1.05);
   const radius = width * 0.44;
   const cx = width / 2;
   const cy = height / 2;
   const ordered = routeOrder(cities);
   const routeLinesData = routeLines(ordered);
+  const { segments, total } = routeSegments(ordered);
 
   const framesMarkup = [];
   const frameRules = [];
   const keyframes = [];
   for (let frame = 0; frame < frames; frame += 1) {
-    const lon0 = (360 * frame) / frames;
+    const progress = frames > 1 ? frame / (frames - 1) : 0;
+    const camera = cameraAt(segments, total, progress);
+    const [lon0, lat0] = camera ?? [0, GLOBE_TILT];
     const landRuns = [];
     for (const polygon of land.coordinates) {
       for (const ring of polygon) {
-        landRuns.push(...globeRing(ring, lon0, GLOBE_TILT, radius, cx, cy));
+        landRuns.push(...globeRing(ring, lon0, lat0, radius, cx, cy));
       }
     }
     const borderRuns = [];
     for (const line of borders) {
-      borderRuns.push(...globeLine(line, lon0, GLOBE_TILT, radius, cx, cy));
+      borderRuns.push(...globeLine(line, lon0, lat0, radius, cx, cy));
     }
     const routeRuns = [];
     for (const line of routeLinesData) {
-      routeRuns.push(...globeLine(line, lon0, GLOBE_TILT, radius, cx, cy));
+      routeRuns.push(...globeLine(line, lon0, lat0, radius, cx, cy));
     }
     const dots = [];
     for (const city of cities) {
-      const [x, y, z] = spherePoint(city.lat, city.lon, lon0, GLOBE_TILT);
+      const [x, y, z] = spherePoint(city.lat, city.lon, lon0, lat0);
       if (z > 0) {
         dots.push(
           `<circle cx="${(cx + radius * x).toFixed(0)}" cy="${(cy - radius * y).toFixed(0)}" r="3.2" fill="${theme.dot}" stroke="${theme.dot_edge}" stroke-width="1"/>`,
@@ -855,15 +858,19 @@ export function renderGlobeSvg(cities, land, themeName = "dark", options = {}) {
         `    ${dots.join("\n    ")}\n` +
         "  </g>\n",
     );
+    const startForward = frame / (2 * frames);
+    const endForward = (frame + 1) / (2 * frames);
+    const startBack = 1 - (frame + 1) / (2 * frames);
+    const endBack = 1 - frame / (2 * frames);
     frameRules.push(
       `.gf${frame}{animation:g${frame} ${duration}s steps(1,end) infinite}`,
     );
     keyframes.push(
-      `@keyframes g${frame}{0%,${fmtPercent(frame / frames)}%{opacity:0}${fmtPercent(
-        frame / frames,
-      )}%,${fmtPercent((frame + 1) / frames)}%{opacity:1}${fmtPercent(
-        (frame + 1) / frames,
-      )}%,100%{opacity:0}}`,
+      `@keyframes g${frame}{0%,${fmtPercent(startForward)}%{opacity:0}` +
+        `${fmtPercent(startForward)}%,${fmtPercent(endForward)}%{opacity:1}` +
+        `${fmtPercent(endForward)}%,${fmtPercent(startBack)}%{opacity:0}` +
+        `${fmtPercent(startBack)}%,${fmtPercent(endBack)}%{opacity:1}` +
+        `${fmtPercent(endBack)}%,100%{opacity:0}}`,
     );
   }
 
@@ -881,8 +888,8 @@ export function renderGlobeSvg(cities, land, themeName = "dark", options = {}) {
 
   const title = "Travel globe";
   const description =
-    "Rotating globe with glowing great-circle routes between cities lived " +
-    "in, visited or transited through, in chronological order.";
+    "Rotating globe that follows a route of great-circle arcs between the " +
+    "cities lived in, visited or transited through, in chronological order.";
   return (
     svgOpen(width, height, title, description) +
     style +
@@ -948,6 +955,46 @@ function routeLines(cities) {
     );
   }
   return lines;
+}
+
+export function routeSegments(cities) {
+  const segments = [];
+  let total = 0;
+  for (let i = 0; i < cities.length - 1; i += 1) {
+    const points = arcPoints(
+      [cities[i].lat, cities[i].lon],
+      [cities[i + 1].lat, cities[i + 1].lon],
+    );
+    let distance = 0;
+    for (let j = 1; j < points.length; j += 1) {
+      distance += haversineKm(
+        points[j - 1][0],
+        points[j - 1][1],
+        points[j][0],
+        points[j][1],
+      );
+    }
+    segments.push({ points, distance });
+    total += distance;
+  }
+  return { segments, total };
+}
+
+export function cameraAt(segments, total, progress) {
+  if (!segments.length || total <= 0) return null;
+  let target = progress * total;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const last = index === segments.length - 1;
+    if (target <= segment.distance || last) {
+      const fraction = segment.distance ? Math.min(1, target / segment.distance) : 0;
+      const step = Math.round(fraction * (segment.points.length - 1));
+      const [lat, lon] = segment.points[Math.min(segment.points.length - 1, step)];
+      return [lon, Math.max(-38, Math.min(38, lat))];
+    }
+    target -= segment.distance;
+  }
+  return null;
 }
 
 export function routeOrder(cities) {

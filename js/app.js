@@ -7,7 +7,6 @@ import {
   arcPoints,
   buildPlaces,
   CityIndex,
-  GLOBE_TILT,
   globeLine,
   globeRing,
   haversineKm,
@@ -33,10 +32,12 @@ const state = {
   mode: "flat",
   globe: {
     lon0: 0,
-    speed: 14,
+    lat0: 20,
+    time: 0,
     paused: false,
     dragging: false,
     lastX: 0,
+    lastInteraction: 0,
     raf: null,
     last: 0,
     ordered: null,
@@ -397,7 +398,7 @@ function drawGlobe(now) {
   ctx.beginPath();
   for (const polygon of state.coarse.coordinates) {
     for (const ring of polygon) {
-      traceRuns(ctx, globeRing(ring, g.lon0, GLOBE_TILT, radius, cx, cy));
+      traceRuns(ctx, globeRing(ring, g.lon0, g.lat0, radius, cx, cy));
     }
   }
   ctx.fillStyle = theme.globe_land || theme.land;
@@ -408,7 +409,7 @@ function drawGlobe(now) {
 
   ctx.beginPath();
   for (const line of state.borders) {
-    for (const run of globeLine(line, g.lon0, GLOBE_TILT, radius, cx, cy)) {
+    for (const run of globeLine(line, g.lon0, g.lat0, radius, cx, cy)) {
       run.forEach(([x, y], index) => {
         if (index) ctx.lineTo(x, y);
         else ctx.moveTo(x, y);
@@ -422,7 +423,7 @@ function drawGlobe(now) {
   ctx.beginPath();
   for (const segment of g.segments) {
     const line = segment.points.map(([lat, lon]) => [lon, lat]);
-    for (const run of globeLine(line, g.lon0, GLOBE_TILT, radius, cx, cy)) {
+    for (const run of globeLine(line, g.lon0, g.lat0, radius, cx, cy)) {
       run.forEach(([x, y], index) => {
         if (index) ctx.lineTo(x, y);
         else ctx.moveTo(x, y);
@@ -436,7 +437,7 @@ function drawGlobe(now) {
   ctx.globalAlpha = 1;
 
   for (const city of state.places.cities) {
-    const [x, y, z] = spherePoint(city.lat, city.lon, g.lon0, GLOBE_TILT);
+    const [x, y, z] = spherePoint(city.lat, city.lon, g.lon0, g.lat0);
     if (z <= 0) continue;
     ctx.beginPath();
     ctx.arc(cx + radius * x, cy - radius * y, 3.2, 0, Math.PI * 2);
@@ -449,7 +450,7 @@ function drawGlobe(now) {
 
   const comet = cometPosition(now);
   if (comet) {
-    const [x, y, z] = spherePoint(comet[0], comet[1], g.lon0, GLOBE_TILT);
+    const [x, y, z] = spherePoint(comet[0], comet[1], g.lon0, g.lat0);
     if (z > 0) {
       ctx.save();
       ctx.shadowColor = theme.glow;
@@ -464,12 +465,29 @@ function drawGlobe(now) {
   ctx.restore();
 }
 
+function followCamera(dt) {
+  const g = state.globe;
+  const comet = cometPosition(g.time);
+  if (!comet) return;
+  const targetLat = Math.max(-38, Math.min(38, comet[0]));
+  const targetLon = comet[1];
+  const delta = ((targetLon - g.lon0 + 540) % 360) - 180;
+  const factor = 1 - Math.exp(-dt * 2.6);
+  g.lon0 = ((g.lon0 + delta * factor + 540) % 360) - 180;
+  g.lat0 += (targetLat - g.lat0) * factor;
+}
+
 function globeTick(now) {
   const g = state.globe;
   const dt = g.last ? Math.min(0.05, (now - g.last) / 1000) : 0;
   g.last = now;
-  if (!g.paused && !g.dragging) g.lon0 = (g.lon0 + g.speed * dt) % 360;
-  drawGlobe(now);
+  if (!g.paused && !g.dragging) {
+    g.time += dt * 1000;
+    // The camera chases the comet; after a drag it waits a moment, then eases
+    // back onto the route.
+    if (performance.now() - g.lastInteraction > 1200) followCamera(dt);
+  }
+  drawGlobe(g.time);
   g.raf = requestAnimationFrame(globeTick);
 }
 
@@ -594,17 +612,20 @@ if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 globeCanvas.addEventListener("pointerdown", (event) => {
   state.globe.dragging = true;
   state.globe.lastX = event.clientX;
+  state.globe.lastInteraction = performance.now();
   globeCanvas.setPointerCapture(event.pointerId);
 });
 globeCanvas.addEventListener("pointermove", (event) => {
   if (!state.globe.dragging) return;
   const dx = event.clientX - state.globe.lastX;
   state.globe.lastX = event.clientX;
+  state.globe.lastInteraction = performance.now();
   state.globe.lon0 = (state.globe.lon0 - dx * 0.3) % 360;
 });
 for (const event of ["pointerup", "pointercancel"]) {
   globeCanvas.addEventListener(event, () => {
     state.globe.dragging = false;
+    state.globe.lastInteraction = performance.now();
   });
 }
 

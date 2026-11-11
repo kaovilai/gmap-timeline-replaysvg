@@ -751,6 +751,36 @@ def _route_lines(cities):
     return [[(lon, lat) for lat, lon in line] for line in lines]
 
 
+def _route_segments(cities):
+    """Great-circle arcs between consecutive cities, with lengths in km."""
+    segments = []
+    total = 0.0
+    for start, end in zip(cities, cities[1:]):
+        points = _arc_points((start["lat"], start["lon"]), (end["lat"], end["lon"]))
+        distance = 0.0
+        for (lat1, lon1), (lat2, lon2) in zip(points, points[1:]):
+            distance += haversine_km(lat1, lon1, lat2, lon2)
+        segments.append((points, distance))
+        total += distance
+    return segments, total
+
+
+def _camera_at(segments, total, progress):
+    """Camera rotation for a point along the route, so the globe follows it."""
+    if not segments or total <= 0:
+        return None
+    target = progress * total
+    for index, (points, distance) in enumerate(segments):
+        last = index == len(segments) - 1
+        if target <= distance or last:
+            fraction = min(1.0, target / distance) if distance else 0.0
+            step = int(fraction * (len(points) - 1) + 0.5)
+            lat, lon = points[min(len(points) - 1, step)]
+            return lon, max(-38.0, min(38.0, lat))
+        target -= distance
+    return None
+
+
 def _route_order(cities):
     """Chronological order for the animated route; unknown years go last."""
     return sorted(
@@ -1118,13 +1148,14 @@ def render_globe_svg(
     width=640,
     borders=None,
     frames=24,
-    duration=18.0,
+    duration=24.0,
 ):
-    """Orthographic globe that rotates one full turn, routes drawn on the sphere.
+    """Rotating globe that follows the route, baked into frames.
 
-    Frames are baked because a README SVG cannot run scripts; each frame is
-    shown for one slice of the cycle by CSS keyframes. Reduced-motion readers
-    see frame 0 only.
+    The camera rotates so the moving point on the route stays centred (within a
+    latitude clamp), which keeps the visited dots on screen instead of spinning
+    past empty ocean. Frames play forward and then backward, so the loop returns
+    to the first city without a jump. Reduced-motion readers see frame 0.
     """
     theme = THEMES[theme_name]
     height = round(width * 1.05, 2)
@@ -1132,27 +1163,30 @@ def render_globe_svg(
     cx = width / 2.0
     cy = height / 2.0
     ordered = _route_order(cities)
-    route_lines = _route_lines(ordered)
+    segments, total = _route_segments(ordered)
 
     frames_markup = []
     frame_rules = []
     keyframes = []
     for frame in range(frames):
-        lon0 = 360.0 * frame / frames
+        progress = frame / (frames - 1) if frames > 1 else 0.0
+        camera = _camera_at(segments, total, progress)
+        lon0, lat0 = camera if camera else (0.0, GLOBE_TILT)
+
         land_runs = []
         for polygon in land["coordinates"]:
             for ring in polygon:
-                land_runs.extend(_globe_ring(ring, lon0, GLOBE_TILT, radius, cx, cy))
+                land_runs.extend(_globe_ring(ring, lon0, lat0, radius, cx, cy))
         border_runs = []
         for line in borders or []:
-            border_runs.extend(_globe_line(line, lon0, GLOBE_TILT, radius, cx, cy))
+            border_runs.extend(_globe_line(line, lon0, lat0, radius, cx, cy))
         route_runs = []
-        for line in route_lines:
-            route_runs.extend(_globe_line(line, lon0, GLOBE_TILT, radius, cx, cy))
+        for line in _route_lines(ordered):
+            route_runs.extend(_globe_line(line, lon0, lat0, radius, cx, cy))
 
         dots = []
         for city in cities:
-            x, y, z = _sphere_point(city["lat"], city["lon"], lon0, GLOBE_TILT)
+            x, y, z = _sphere_point(city["lat"], city["lon"], lon0, lat0)
             if z > 0:
                 dots.append(
                     '<circle cx="%.0f" cy="%.0f" r="3.2" fill="%s" stroke="%s" stroke-width="1"/>'
@@ -1178,19 +1212,29 @@ def render_globe_svg(
                 "\n    ".join(dots),
             )
         )
-        start = frame / frames
-        end = (frame + 1) / frames
+
+        # Each frame shows twice: forward at the start of the cycle and backward
+        # at the end, so the route ping-pongs.
+        start_forward = frame / (2.0 * frames)
+        end_forward = (frame + 1) / (2.0 * frames)
+        start_back = 1.0 - (frame + 1) / (2.0 * frames)
+        end_back = 1.0 - frame / (2.0 * frames)
         frame_rules.append(
             ".gf%d{animation:g%d %gs steps(1,end) infinite}" % (frame, frame, duration)
         )
         keyframes.append(
-            "@keyframes g%d{0%%,%s%%{opacity:0}%s%%,%s%%{opacity:1}%s%%,100%%{opacity:0}}"
+            "@keyframes g%d{0%%,%s%%{opacity:0}%s%%,%s%%{opacity:1}"
+            "%s%%,%s%%{opacity:0}%s%%,%s%%{opacity:1}%s%%,100%%{opacity:0}}"
             % (
                 frame,
-                _fmt_percent(start),
-                _fmt_percent(start),
-                _fmt_percent(end),
-                _fmt_percent(end),
+                _fmt_percent(start_forward),
+                _fmt_percent(start_forward),
+                _fmt_percent(end_forward),
+                _fmt_percent(end_forward),
+                _fmt_percent(start_back),
+                _fmt_percent(start_back),
+                _fmt_percent(end_back),
+                _fmt_percent(end_back),
             )
         )
 
@@ -1209,8 +1253,8 @@ def render_globe_svg(
 
     title = "Travel globe"
     description = (
-        "Rotating globe with glowing great-circle routes between cities lived "
-        "in, visited or transited through, in chronological order."
+        "Rotating globe that follows a route of great-circle arcs between the "
+        "cities lived in, visited or transited through, in chronological order."
     )
     return (
         _svg_open(width, height, title, description)
@@ -1394,7 +1438,7 @@ def build_parser():
         )
         p.add_argument("--globe-width", type=int, default=640)
         p.add_argument("--globe-frames", type=int, default=24)
-        p.add_argument("--globe-duration", type=float, default=18.0)
+        p.add_argument("--globe-duration", type=float, default=24.0)
 
     p_import = sub.add_parser("import", help="export -> data/places.json (PII-stripped)")
     import_options(p_import)
@@ -1438,7 +1482,7 @@ def build_parser():
         )
     p_all.add_argument("--globe-width", type=int, default=640)
     p_all.add_argument("--globe-frames", type=int, default=24)
-    p_all.add_argument("--globe-duration", type=float, default=18.0)
+    p_all.add_argument("--globe-duration", type=float, default=24.0)
     p_all.set_defaults(func=command_all)
     return parser
 

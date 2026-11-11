@@ -8,7 +8,7 @@ put in a profile README. Four looks, all from the same city-level data:
 | **static** | dots on a world map |
 | **animated** | a glowing dash ping-pongs along great-circle arcs, one hop at a time |
 | **drift** | the flat map slowly pans a full width and repeats |
-| **globe** | an orthographic globe rotates one full turn, routes drawn on the sphere |
+| **globe** | an orthographic globe whose camera follows the route, routes drawn on the sphere |
 
 Everything runs locally. The only thing the tool ever writes is a small JSON
 file of **city names and gazetteer city centres** plus the SVGs drawn from it.
@@ -134,10 +134,13 @@ are dropped; position/path samples use the tighter `--max-path-km` (default
   reduced-motion readers get the still map.
 - Output is deterministic: the same `places.json` renders byte-identical SVGs.
 
-The drift variant tiles the map twice so the pan has no seam, and the globe
-bakes 24 frames (one every 15°) into a single SVG — a README image cannot run
-scripts, so the rotation has to be pre-rendered. At 640 px the globe file is
-about 750 kB; lower `--globe-frames` or `--globe-width` to shrink it.
+The drift variant tiles the map twice so the pan has no seam. The globe bakes
+24 frames into a single SVG, each frame sampled along the route so the camera
+follows the moving point and keeps the dots in view (latitude is clamped to
+±38° so the poles never distort); the frames play forward, then backward, so the
+loop returns to the first city without a jump. A README image cannot run
+scripts, so the motion has to be pre-rendered. At 640 px the globe file is about
+630 kB; lower `--globe-frames` or `--globe-width` to shrink it.
 
 Tuning: `--duration 120` slows the animated cycle (default 90 s), `--no-animated`,
 `--no-drift` and `--no-globe` skip variants, `--theme dark` renders one theme.
@@ -171,7 +174,7 @@ python3 -I -B worldmap.py all ~/Downloads/Timeline.json
 | `--no-globe` | off | skip globe variants |
 | `--globe-width` | `640` | globe SVG width |
 | `--globe-frames` | `24` | baked rotation frames |
-| `--globe-duration` | `18` | seconds per globe rotation |
+| `--globe-duration` | `24` | seconds per forward-and-back globe cycle |
 
 ## Basemap data
 
