@@ -1,0 +1,9 @@
+{
+  "name": "gmap-timeline-replaysvg",
+  "private": true,
+  "type": "module",
+  "description": "Browser and Node map logic for gmap-timeline-replaysvg; no dependencies.",
+  "scripts": {
+    "test": "node tests/parity.mjs"
+  }
+}

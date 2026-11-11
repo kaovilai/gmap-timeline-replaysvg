@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Timeline replay map</title>
+    <meta
+      name="description"
+      content="Turn a Google Maps Timeline export into a city-level world map SVG. Runs entirely in your browser."
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Timeline replay map</h1>
+        <p class="lede">
+          Turn a Google Maps Timeline export into a city-level world map SVG for
+          your profile README — static or animated. Everything runs in this tab:
+          <strong>your export is never uploaded</strong>, and only city names and
+          city centres are written into the files you download.
+        </p>
+      </header>
+
+      <section class="picker" id="picker">
+        <label class="button" for="file">Choose Timeline export</label>
+        <input
+          id="file"
+          type="file"
+          accept=".json,.zip,application/json,application/zip"
+        />
+        <p class="hint">
+          <code>Timeline.json</code> (Android), <code>location-history.json</code>
+          (iPhone), a Takeout <code>.json</code>, or the <code>.zip</code> the
+          Maps app saves. You can also drop the file here.
+        </p>
+      </section>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+
+      <section class="result" id="result" hidden>
+        <p class="summary" id="summary"></p>
+
+        <figure class="preview">
+          <img id="preview" alt="Preview of the generated travel map" />
+          <figcaption>
+            <label for="theme">Preview theme</label>
+            <select id="theme">
+              <option value="auto">Match system</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </figcaption>
+        </figure>
+
+        <h2>Download</h2>
+        <ul class="downloads" id="downloads"></ul>
+        <p class="hint">
+          Commit the SVGs to your profile repo. <code>places.json</code> is the
+          city-level data they were drawn from — useful to diff when your travel
+          changes, but not required by the SVGs.
+        </p>
+
+        <details>
+          <summary>Put it on your README</summary>
+          <p>Paste this where the map should appear:</p>
+          <pre id="snippet"></pre>
+          <button type="button" id="copy">Copy snippet</button>
+
+          <p class="repo-row">
+            <label for="repo">Your profile repo</label>
+            <input id="repo" placeholder="owner/repo" autocomplete="off" />
+          </p>
+          <p class="hint" id="upload-hint">
+            Downloads land in your phone's Files app. Use GitHub's upload page to
+            add them to the repo, then edit README.md with the snippet above.
+          </p>
+          <a id="upload" class="button" target="_blank" rel="noopener" hidden>
+            Open GitHub upload page
+          </a>
+        </details>
+
+        <details>
+          <summary>What is in the files</summary>
+          <p id="privacy-detail">
+            Every sample in the export is snapped to the nearest populated place
+            in a bundled gazetteer. The output contains the gazetteer's city
+            name, region, country, city-centre coordinates, visit counts and
+            first/last year. Raw positions, addresses and place names/IDs never
+            reach the files.
+          </p>
+        </details>
+      </section>
+
+      <footer>
+        <p>
+          Zero network calls after page load. Basemap data is public-domain
+          <a href="https://www.naturalearthdata.com/">Natural Earth</a>. Source:
+          <a href="https://github.com/kaovilai/gmap-timeline-replaysvg"
+            >kaovilai/gmap-timeline-replaysvg</a
+          >.
+        </p>
+      </footer>
+    </main>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>

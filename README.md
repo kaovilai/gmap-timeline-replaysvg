@@ -17,6 +17,23 @@ file of **city names and gazetteer city centres** plus the SVGs drawn from it.
 person's history. Static variants: [light](examples/worldmap-light.svg) ·
 [dark](examples/worldmap-dark.svg).</sub>
 
+## Use it on your phone
+
+Open **https://github.tig.pw/gmap-timeline-replaysvg/**
+(also **https://kaovilai.github.io/gmap-timeline-replaysvg/**).
+
+1. Export Timeline from the Maps app (steps below) and keep the `.json` or
+   `.zip` in your phone's Files app.
+2. Tap **Choose Timeline export** and pick it. Parsing and drawing happen in the
+   browser; the file never leaves the device.
+3. Download the animated (and/or static) SVGs — they land in Files.
+4. Upload them to your profile repo from GitHub's mobile site, then paste the
+   README snippet the page gives you.
+
+The page uses the same JavaScript renderer that is verified byte-for-byte
+against the Python CLI in CI (`tests/parity.mjs`), so a map produced on the
+phone is identical to one produced on a laptop.
+
 ## Why
 
 Google retired the cloud copy of Timeline in 2024; the history now lives on the
