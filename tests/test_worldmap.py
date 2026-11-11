@@ -319,9 +319,13 @@ class RenderTests(unittest.TestCase):
         root = ET.fromstring(svg)
         # One halo + one dot per city, one leg per consecutive pair.
         self.assertEqual(len(list(root.iter(NS + "circle"))), 2 * len(self.cities))
-        self.assertIn("@keyframes leg0", svg)
-        self.assertIn("prefers-reduced-motion", svg)
-        self.assertIn("animation-name:leg0", svg)
+        # SMIL, not CSS keyframes: Safari only animates SVGs loaded as <img>
+        # when the animation is SMIL.
+        dash_animations = svg.count('attributeName="stroke-dashoffset"')
+        self.assertGreaterEqual(dash_animations, 2)
+        self.assertEqual(dash_animations % 2, 0)
+        self.assertIn('attributeName="opacity"', svg)
+        self.assertNotIn("@keyframes", svg)
         self.assertNotIn("<script", svg.lower())
         self.assertNotIn("xlink:href", svg)
         # The only absolute URL allowed is the SVG namespace.
@@ -349,9 +353,8 @@ class RenderTests(unittest.TestCase):
         svg = WM.render_animated_svg(cities, self.land, "dark", borders=self.borders)
         # The arc crosses the antimeridian and is drawn as two separate legs so
         # the dash pattern does not restart mid-path.
-        self.assertIn("leg0", svg)
-        self.assertIn("leg1", svg)
-        self.assertNotIn("@keyframes leg2", svg)
+        self.assertIn('class="leg leg1', svg)
+        self.assertNotIn('class="leg leg2', svg)
 
     def test_drift_svg_is_valid_and_deterministic(self):
         svg = WM.render_drift_svg(self.cities, self.land, "light", borders=self.borders)
@@ -401,7 +404,7 @@ class RenderTests(unittest.TestCase):
         )
         root = ET.fromstring(svg)
         self.assertEqual(len(list(root.iter(NS + "circle"))), 2)
-        self.assertNotIn("@keyframes leg0", svg)
+        self.assertNotIn('attributeName="stroke-dashoffset"', svg)
 
 
 class GifTests(unittest.TestCase):

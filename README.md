@@ -160,10 +160,12 @@ python3 -I -B worldmap.py import ~/Downloads/Timeline.json \
 - A glowing dash **ping-pongs** along the arcs, one hop at a time: forward
   through the years, then backward. Each city's halo flares as the comet
   arrives.
-- Pure inline CSS and SVG filters — no scripts, no external references — so it
-  animates as an `<img>` in a README.
-- All motion is inside `@media (prefers-reduced-motion: no-preference)`;
-  reduced-motion readers get the still map.
+- Pure inline **SMIL** and SVG filters — no scripts, no external references —
+  so it animates as an `<img>` in a README. SMIL matters: Safari does not run
+  CSS animations inside an SVG loaded through `<img>`, so a CSS-animated map
+  sits still on iPhones; SMIL runs in every evergreen browser there.
+- Images do not see `prefers-reduced-motion`, so the motion is always on; the
+  still route and dots are what a screenshot shows.
 - Output is deterministic: the same `places.json` renders byte-identical SVGs.
 
 The drift variant tiles the map twice so the pan has no seam. The globe bakes
@@ -171,7 +173,10 @@ frames into a single SVG, each sampled along the route so the camera follows the
 moving point and keeps the dots in view (latitude is clamped to ±38° so the
 poles never distort); the frames play forward, then backward, so the loop
 returns to the first city without a jump. A README image cannot run scripts, so
-the motion has to be pre-rendered.
+the motion has to be pre-rendered. The drift and globe variants still animate
+with CSS keyframes, which Safari ignores inside `<img>` — prefer the animated
+flat map for a README and use the others where Chrome/Firefox rendering is
+enough.
 
 ### Globe smoothness (FPS)
 

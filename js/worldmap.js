@@ -1117,6 +1117,36 @@ export function fmtPercent(fraction) {
   return text || "0";
 }
 
+function fmtFraction(value) {
+  const text = value
+    .toFixed(6)
+    .replace(/0+$/, "")
+    .replace(/\.$/, "");
+  return text || "0";
+}
+
+function legTimes(index, legs) {
+  const n = Math.max(1, legs.length);
+  return [
+    0,
+    index / (2 * n),
+    (index + 1) / (2 * n),
+    0.5 + (n - 1 - index) / (2 * n),
+    0.5 + (n - index) / (2 * n),
+    1,
+  ];
+}
+
+function legAnimate(index, legs, dashes, duration) {
+  const length = legs[index][1];
+  const dash = dashes[index];
+  const park = Math.trunc(dash + 1);
+  const end = Math.trunc(-(length + 1));
+  const values = [park, park, end, end, park, park].join(";");
+  const keyTimes = legTimes(index, legs).map(fmtFraction).join(";");
+  return `<animate attributeName="stroke-dashoffset" dur="${duration.toFixed(1)}s" repeatCount="indefinite" values="${values}" keyTimes="${keyTimes}"/>`;
+}
+
 function legKeyframes(index, legs, dashes) {
   const length = legs[index][1];
   const dash = dashes[index];
@@ -1165,27 +1195,25 @@ export function renderAnimatedSvg(
     const [x, y] = projection.point(city.lat, city.lon);
     const delay = ((index / total) * half) % 4.5;
     halos.push(
-      `<circle class="halo" cx="${f1(x)}" cy="${f1(y)}" r="12" fill="${theme.halo}" style="animation-delay:${delay.toFixed(2)}s"/>`,
+      `<circle class="halo" cx="${f1(x)}" cy="${f1(y)}" r="12" fill="${theme.halo}"><animate attributeName="opacity" values="0.10;0.50;0.10" keyTimes="0;0.5;1" dur="4.5s" begin="${delay.toFixed(2)}s" repeatCount="indefinite"/></circle>`,
     );
     dots.push(
       `<circle cx="${f1(x)}" cy="${f1(y)}" r="4.2" fill="${theme.dot}" stroke="${theme.dot_edge}" stroke-width="1.2"/>`,
     );
   });
 
+  const dashes = legs.map(([, length]) => Math.max(20, Math.min(46, length * 0.35)));
   const legMarkup = [];
   legs.forEach(([path], index) => {
-    legMarkup.push(`<path class="leg leg${index} glow" d="${path}"/>`);
-    legMarkup.push(`<path class="leg leg${index}" d="${path}"/>`);
+    const animate = legAnimate(index, legs, dashes, duration);
+    legMarkup.push(`<path class="leg leg${index} glow" d="${path}">${animate}</path>`);
+    legMarkup.push(`<path class="leg leg${index}" d="${path}">${animate}</path>`);
   });
 
-  const dashes = legs.map(([, length]) => Math.max(20, Math.min(46, length * 0.35)));
-  const keyframes = legs
-    .map((_, index) => legKeyframes(index, legs, dashes))
-    .join("");
   const legNames = legs
     .map(
       ([, length], index) =>
-        `.leg${index}{animation-name:leg${index};stroke-dasharray:${Math.trunc(dashes[index])} ${Math.trunc(length + dashes[index])};stroke-dashoffset:${Math.trunc(dashes[index] + 1)}}`,
+        `.leg${index}{stroke-dasharray:${Math.trunc(dashes[index])} ${Math.trunc(length + dashes[index])};stroke-dashoffset:${Math.trunc(dashes[index] + 1)}}`,
     )
     .join("");
   const style =
@@ -1193,13 +1221,7 @@ export function renderAnimatedSvg(
     `.leg{fill:none;stroke:${theme.glow};stroke-width:2.2;stroke-linecap:round}\n` +
     ".leg.glow{stroke-width:7;opacity:.5;filter:url(#soft)}\n" +
     ".halo{opacity:.10}\n" +
-    "@media (prefers-reduced-motion:no-preference){\n" +
-    `.leg{animation-duration:${duration.toFixed(1)}s;animation-timing-function:linear;animation-iteration-count:infinite}\n` +
     `${legNames}\n` +
-    ".halo{animation:twinkle 4.5s ease-in-out infinite}\n" +
-    `${keyframes}\n` +
-    "@keyframes twinkle{0%,100%{opacity:.10}50%{opacity:.5}}\n" +
-    "}\n" +
     "</style>\n";
 
   const title = "Travel map";

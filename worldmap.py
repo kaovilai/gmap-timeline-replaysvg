@@ -881,19 +881,15 @@ def _fmt_percent(fraction):
     return text or "0"
 
 
-def _leg_keyframes(index, legs, dashes):
-    """One ping-pong pass of the comet along a single leg.
+def _fmt_fraction(value):
+    text = ("%.6f" % value).rstrip("0").rstrip(".")
+    return text or "0"
 
-    The dash is parked just past either end of the leg so each leg is dark
-    except during its own slot: forward in the first half of the cycle,
-    backward in the second half.
-    """
-    length = legs[index][1]
-    dash = dashes[index]
+
+def _leg_times(index, legs):
+    """Hold, move forward, hold, move back, hold over one loop."""
     n = max(1, len(legs))
-    park = int(dash + 1)
-    end = int(-(length + 1))
-    times = (
+    return (
         0.0,
         index / (2 * n),
         (index + 1) / (2 * n),
@@ -901,12 +897,32 @@ def _leg_keyframes(index, legs, dashes):
         0.5 + (n - index) / (2 * n),
         1.0,
     )
+
+
+def _leg_animate(index, legs, dashes, duration):
+    """SMIL ping-pong for one leg.
+
+    SMIL rather than CSS keyframes: Safari does not run CSS animations inside
+    an SVG loaded through <img> (so a README map sat still on phones), while
+    SMIL animates in every evergreen browser in that context. The dash is
+    parked just past either end of the leg so each leg is dark except during
+    its own slot: forward in the first half of the cycle, backward in the
+    second half.
+    """
+    length = legs[index][1]
+    dash = dashes[index]
+    park = int(dash + 1)
+    end = int(-(length + 1))
     values = (park, park, end, end, park, park)
-    steps = "".join(
-        "%s%%{stroke-dashoffset:%d}" % (_fmt_percent(t), v)
-        for t, v in zip(times, values)
+    return (
+        '<animate attributeName="stroke-dashoffset" dur="%.1fs" '
+        'repeatCount="indefinite" values="%s" keyTimes="%s"/>'
+        % (
+            duration,
+            ";".join(str(value) for value in values),
+            ";".join(_fmt_fraction(t) for t in _leg_times(index, legs)),
+        )
     )
-    return "@keyframes leg%d{%s}" % (index, steps)
 
 
 def render_animated_svg(
@@ -914,10 +930,11 @@ def render_animated_svg(
 ):
     """Animated map: glowing dashes ping-pong along the chronological route.
 
-    Everything is inline (CSS keyframes plus an SVG blur) so the file still works
-    as an <img> in a README: no scripts, no external references. Motion lives
-    inside prefers-reduced-motion: no-preference, so the still route and dots are
-    the fallback, and the file is byte-for-byte deterministic.
+    Everything is inline (SMIL animations plus an SVG blur) so the file still
+    works as an <img> in a README on every browser, Safari included: no
+    scripts, no external references. SMIL cannot see prefers-reduced-motion,
+    so the motion is always on; the static route and dots are what a still
+    capture shows. The file is byte-for-byte deterministic.
     """
     theme = THEMES[theme_name]
     projection = Projection(width)
@@ -937,8 +954,10 @@ def render_animated_svg(
         # Flare each halo roughly when the comet reaches its city.
         delay = ((index / total) * half) % 4.5
         halos.append(
-            '<circle class="halo" cx="%.1f" cy="%.1f" r="12" fill="%s" '
-            'style="animation-delay:%.2fs"/>'
+            '<circle class="halo" cx="%.1f" cy="%.1f" r="12" fill="%s">'
+            '<animate attributeName="opacity" values="0.10;0.50;0.10" '
+            'keyTimes="0;0.5;1" dur="4.5s" begin="%.2fs" '
+            'repeatCount="indefinite"/></circle>'
             % (x, y, theme["halo"], delay)
         )
         dots.append(
@@ -946,18 +965,20 @@ def render_animated_svg(
             % (x, y, theme["dot"], theme["dot_edge"])
         )
 
+    dash = [max(20.0, min(46.0, length * 0.35)) for _path, length in legs]
     leg_markup = []
     for index, (leg, _length) in enumerate(legs):
+        animate = _leg_animate(index, legs, dash, duration)
         leg_markup.append(
-            '<path class="leg leg%d glow" d="%s"/>' % (index, leg)
+            '<path class="leg leg%d glow" d="%s">%s</path>' % (index, leg, animate)
         )
-        leg_markup.append('<path class="leg leg%d" d="%s"/>' % (index, leg))
+        leg_markup.append(
+            '<path class="leg leg%d" d="%s">%s</path>' % (index, leg, animate)
+        )
 
-    dash = [max(20.0, min(46.0, length * 0.35)) for _path, length in legs]
-    keyframes = "".join(_leg_keyframes(i, legs, dash) for i in range(len(legs)))
     leg_names = "".join(
-        ".leg%d{animation-name:leg%d;stroke-dasharray:%d %d;stroke-dashoffset:%d}"
-        % (i, i, dash[i], int(length + dash[i]), int(dash[i] + 1))
+        ".leg%d{stroke-dasharray:%d %d;stroke-dashoffset:%d}"
+        % (i, dash[i], int(length + dash[i]), int(dash[i] + 1))
         for i, (_path, length) in enumerate(legs)
     )
     style = (
@@ -965,20 +986,11 @@ def render_animated_svg(
         ".leg{fill:none;stroke:%(glow)s;stroke-width:2.2;stroke-linecap:round}\n"
         ".leg.glow{stroke-width:7;opacity:.5;filter:url(#soft)}\n"
         ".halo{opacity:.10}\n"
-        "@media (prefers-reduced-motion:no-preference){\n"
-        ".leg{animation-duration:%(duration).1fs;animation-timing-function:linear;"
-        "animation-iteration-count:infinite}\n"
         "%(leg_names)s\n"
-        ".halo{animation:twinkle 4.5s ease-in-out infinite}\n"
-        "%(keyframes)s\n"
-        "@keyframes twinkle{0%%,100%%{opacity:.10}50%%{opacity:.5}}\n"
-        "}\n"
         "</style>\n"
     ) % {
         "glow": theme["glow"],
-        "duration": duration,
         "leg_names": leg_names,
-        "keyframes": keyframes,
     }
 
     title = "Travel map"
