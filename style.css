@@ -277,6 +277,45 @@ button.ghost {
   font-size: 0.95rem;
 }
 
+.finder {
+  margin-top: 1rem;
+  background: var(--card);
+  box-shadow: none;
+  text-align: left;
+}
+
+.finder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1rem 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.finder-grid h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+}
+
+.finder-grid ol {
+  margin: 0 0 0.75rem;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.finder-grid li + li {
+  margin-top: 0.3rem;
+}
+
+.finder-grid .button {
+  font-size: 0.85rem;
+  padding: 0.5rem 0.8rem;
+}
+
+.finder-grid .button + .button {
+  margin-left: 0.4rem;
+}
+
 .field-row {
   display: flex;
   flex-wrap: wrap;

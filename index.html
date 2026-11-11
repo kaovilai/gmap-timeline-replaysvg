@@ -55,6 +55,72 @@
           (iPhone), a Takeout <code>.json</code>, or the <code>.zip</code> the
           Maps app saves. You can also drop the file here.
         </p>
+        <details class="finder" id="export-help">
+          <summary>Where is the export?</summary>
+          <div class="finder-grid">
+            <section>
+              <h3>Android</h3>
+              <ol>
+                <li>Open the phone's <strong>Settings</strong> app.</li>
+                <li><strong>Location</strong> → <strong>Location services</strong> →
+                  <strong>Timeline</strong>.</li>
+                <li>Under “Timeline”, tap <strong>Export timeline data</strong>.</li>
+              </ol>
+              <a
+                class="button"
+                href="https://support.google.com/maps/answer/6258979?co=GENIE.Platform%3DAndroid"
+                target="_blank"
+                rel="noopener"
+                >Google's Android steps</a
+              >
+            </section>
+            <section>
+              <h3>iPhone &amp; iPad</h3>
+              <ol>
+                <li>Open <strong>Google Maps</strong> → profile picture →
+                  <strong>Settings</strong> → <strong>Location &amp; Privacy</strong>.</li>
+                <li>Tap <strong>Export Timeline data</strong>.</li>
+                <li>On the share sheet, <strong>Save to Files</strong> →
+                  <code>location-history.json</code>.</li>
+              </ol>
+              <a
+                class="button"
+                id="open-maps-ios"
+                href="comgooglemaps://"
+                hidden
+                >Open Google Maps</a
+              >
+              <a
+                class="button secondary"
+                href="https://support.google.com/maps/answer/6258979?co=GENIE.Platform%3DiOS"
+                target="_blank"
+                rel="noopener"
+                >Google's iPhone steps</a
+              >
+            </section>
+            <section>
+              <h3>Older Takeout archive</h3>
+              <p class="hint">
+                If your history predates the on-device move, Takeout may still
+                have <code>Records.json</code>, <code>Location History.json</code>
+                or <code>Semantic Location History/</code>.
+              </p>
+              <a
+                class="button secondary"
+                href="https://takeout.google.com/"
+                target="_blank"
+                rel="noopener"
+                >Open Google Takeout</a
+              >
+            </section>
+          </div>
+          <p class="hint">
+            Google publishes no link that opens the Timeline export screen
+            directly — Android's system settings can't be opened from a web page
+            and iOS has no settings URL — so these buttons open the right app or
+            service and the steps above pick it up from there.
+          </p>
+        </details>
       </section>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>

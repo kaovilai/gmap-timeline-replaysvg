@@ -789,6 +789,11 @@ $("copy").addEventListener("click", async () => {
   }
 });
 
+// comgooglemaps:// only works on iOS; hide it elsewhere.
+if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+  $("open-maps-ios").hidden = false;
+}
+
 const repoInput = $("repo");
 const uploadLink = $("upload");
 const savedRepo = localStorage.getItem("gmap-repo");

@@ -61,13 +61,18 @@ addresses or place names.
 
 ## Get your export
 
-**Android** (Google Maps app): profile picture → **Settings** → **Location &
-privacy** → **Location services** → **Timeline** → **Export timeline data**.
-Save the `.zip`, unzip it; the file is `Timeline.json`.
+**Android**: open the phone's **Settings** app → **Location** → **Location
+services** → **Timeline** → **Export timeline data**. (Some Maps versions expose
+the same button at profile picture → **Your Timeline** → ⋮ → **Location and
+privacy settings**.) The file is `Timeline.json`.
 
-**iPhone** (Google Maps app): **Settings** → **Location & privacy** → **Location
-services** → **Timeline** → **Export timeline data**. The file is
+**iPhone / iPad**: **Google Maps** → profile picture → **Settings** → **Location
+& Privacy** → **Export Timeline data** → **Save to Files**. The file is
 `location-history.json`.
+
+There is no web deep link into that screen — Android's system settings can't be
+opened from a page, and iOS has no settings URL — so the page links Google's
+per-platform help article and Takeout instead.
 
 Older Google Takeout archives work too: `Records.json`, `Location History.json`
 and `Semantic Location History/YYYY/*.json`.
