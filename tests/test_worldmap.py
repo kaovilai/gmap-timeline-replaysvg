@@ -244,6 +244,7 @@ class RenderTests(unittest.TestCase):
             },
         ]
         self.land = WM.load_land()
+        self.coarse = WM.load_land_coarse()
         self.borders = WM.load_borders()
 
     def test_svg_is_valid_and_has_a_dot_per_city(self):
@@ -308,6 +309,44 @@ class RenderTests(unittest.TestCase):
         self.assertIn("leg1", svg)
         self.assertNotIn("@keyframes leg2", svg)
 
+    def test_drift_svg_is_valid_and_deterministic(self):
+        svg = WM.render_drift_svg(self.cities, self.land, "light", borders=self.borders)
+        root = ET.fromstring(svg)
+        self.assertEqual(len(list(root.iter(NS + "circle"))), 2 * len(self.cities))
+        self.assertIn("translateX(-1280px)", svg)
+        self.assertIn("prefers-reduced-motion", svg)
+        # The map is tiled twice so the pan has no seam.
+        self.assertEqual(svg.count('fill-rule="evenodd"'), 2)
+        self.assertEqual(
+            svg,
+            WM.render_drift_svg(self.cities, self.land, "light", borders=self.borders),
+        )
+
+    def test_globe_svg_frames(self):
+        svg = WM.render_globe_svg(
+            self.cities, self.coarse, "dark", borders=self.borders
+        )
+        root = ET.fromstring(svg)
+        frames = [g for g in root.iter(NS + "g") if "gf" in (g.get("class") or "")]
+        self.assertEqual(len(frames), 24)
+        self.assertEqual(len(list(root.iter(NS + "circle"))) >= len(self.cities), True)
+        self.assertIn("@keyframes g0", svg)
+        self.assertIn("prefers-reduced-motion", svg)
+        self.assertNotIn("<script", svg.lower())
+        self.assertEqual(
+            svg,
+            WM.render_globe_svg(
+                self.cities, self.coarse, "dark", borders=self.borders
+            ),
+        )
+
+    def test_globe_frame_count_option(self):
+        svg = WM.render_globe_svg(
+            self.cities, self.coarse, "dark", borders=self.borders, frames=8
+        )
+        self.assertIn("@keyframes g7", svg)
+        self.assertNotIn("@keyframes g8", svg)
+
     def test_animated_single_city_has_no_legs(self):
         svg = WM.render_animated_svg(
             self.cities[:1], self.land, "dark", borders=self.borders
@@ -343,6 +382,12 @@ class CommittedArtifactTests(unittest.TestCase):
                 ),
                 f"worldmap-animated-{theme}.svg": WM.render_animated_svg(
                     cities, land, theme, borders=borders
+                ),
+                f"worldmap-drift-{theme}.svg": WM.render_drift_svg(
+                    cities, land, theme, borders=borders
+                ),
+                f"worldmap-globe-{theme}.svg": WM.render_globe_svg(
+                    cities, WM.load_land_coarse(), theme, borders=borders
                 ),
             }
             for name, expected in expected_files.items():

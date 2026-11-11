@@ -502,6 +502,9 @@ THEMES = {
         "dot_edge": "#ffffff",
         "glow": "#ff5a3c",
         "halo": "#e8453c",
+        "ocean_hi": "#c6e7ff",
+        "ocean_lo": "#7cc3ef",
+        "globe_land": "#f2efe9",
     },
     "dark": {
         "ocean": "#0b1a2a",
@@ -512,6 +515,9 @@ THEMES = {
         "dot_edge": "#0b1a2a",
         "glow": "#ff8f6b",
         "halo": "#ff6b5e",
+        "ocean_hi": "#173855",
+        "ocean_lo": "#06121d",
+        "globe_land": "#24405a",
     },
 }
 
@@ -526,6 +532,14 @@ def _mercator_y(lat):
 def load_land(path=None):
     land_path = pathlib.Path(path) if path else MAPDATA_DIR / "world-land.json"
     with land_path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def load_land_coarse(path=None):
+    coarse_path = (
+        pathlib.Path(path) if path else MAPDATA_DIR / "world-land-coarse.json"
+    )
+    with coarse_path.open(encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -624,12 +638,9 @@ def _lines_path(lines, projection):
     return " ".join(parts)
 
 
-def render_svg(cities, land, theme_name="light", width=1280, borders=None):
-    theme = THEMES[theme_name]
-    projection = Projection(width)
-    height = projection.height
-
-    paths = list(_land_paths(land, projection))
+def _flat_layers(cities, land, projection, theme, borders):
+    """Land, borders and city dots for the flat map, as SVG fragments."""
+    paths = " ".join(_land_paths(land, projection))
     border_path = _lines_path(borders or [], projection)
     dots = []
     for city in sorted(cities, key=lambda c: (c["lat"], c["lon"])):
@@ -638,19 +649,7 @@ def render_svg(cities, land, theme_name="light", width=1280, borders=None):
             '<circle cx="%.1f" cy="%.1f" r="4.2" fill="%s" stroke="%s" stroke-width="1.2"/>'
             % (x, y, theme["dot"], theme["dot_edge"])
         )
-
-    title = "Travel map"
-    description = (
-        "World map with red dots marking cities the owner has lived in, visited "
-        "or transited through, generated at city level."
-    )
     return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%.2f" '
-        'viewBox="0 0 %d %.2f" role="img" aria-labelledby="map-title map-desc">\n'
-        "  <title id=\"map-title\">%s</title>\n"
-        "  <desc id=\"map-desc\">%s</desc>\n"
-        '  <rect width="%d" height="%.2f" fill="%s"/>\n'
         '  <g fill="%s" stroke="%s" stroke-width="0.7" fill-rule="evenodd">\n'
         "    <path d=\"%s\"/>\n"
         "  </g>\n"
@@ -658,24 +657,43 @@ def render_svg(cities, land, theme_name="light", width=1280, borders=None):
         "    <path d=\"%s\"/>\n"
         "  </g>\n"
         "  <g>\n    %s\n  </g>\n"
-        "</svg>\n"
         % (
-            width,
-            height,
-            width,
-            height,
-            title,
-            description,
-            width,
-            height,
-            theme["ocean"],
             theme["land"],
             theme["coast"],
-            " ".join(paths),
+            paths,
             theme["border"],
             border_path,
             "\n    ".join(dots),
         )
+    )
+
+
+def _svg_open(width, height, title, description):
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%.2f" '
+        'viewBox="0 0 %d %.2f" role="img" aria-labelledby="map-title map-desc">\n'
+        "  <title id=\"map-title\">%s</title>\n"
+        "  <desc id=\"map-desc\">%s</desc>\n"
+        % (width, height, width, height, title, description)
+    )
+
+
+def render_svg(cities, land, theme_name="light", width=1280, borders=None):
+    theme = THEMES[theme_name]
+    projection = Projection(width)
+    height = projection.height
+    title = "Travel map"
+    description = (
+        "World map with red dots marking cities the owner has lived in, visited "
+        "or transited through, generated at city level."
+    )
+    return (
+        _svg_open(width, height, title, description)
+        + '  <rect width="%d" height="%.2f" fill="%s"/>\n'
+        % (width, height, theme["ocean"])
+        + _flat_layers(cities, land, projection, theme, borders)
+        + "</svg>\n"
     )
 
 
@@ -947,6 +965,270 @@ def render_animated_svg(
 
 
 
+GLOBE_TILT = 20.0
+
+
+def _sphere_point(lat, lon, lon0, lat0):
+    """Unit-sphere coordinates after rotating the globe to lon0/lat0."""
+    phi = math.radians(lat)
+    lam = math.radians(lon - lon0)
+    phi0 = math.radians(lat0)
+    x = math.cos(phi) * math.sin(lam)
+    y = math.cos(phi0) * math.sin(phi) - math.sin(phi0) * math.cos(phi) * math.cos(lam)
+    z = math.sin(phi0) * math.sin(phi) + math.cos(phi0) * math.cos(phi) * math.cos(lam)
+    return x, y, z
+
+
+def _limb_point(a, b):
+    """Where the chord between two sphere points crosses the visible limb (z=0)."""
+    t = a[2] / (a[2] - b[2])
+    x = a[0] + t * (b[0] - a[0])
+    y = a[1] + t * (b[1] - a[1])
+    norm = math.hypot(x, y) or 1.0
+    return x / norm, y / norm
+
+
+def _limb_arc(exit_point, entry_point, radius, cx, cy):
+    """Limb arc from a run's exit back to its own entry, the short way."""
+    a0 = math.atan2(exit_point[1], exit_point[0])
+    a1 = math.atan2(entry_point[1], entry_point[0])
+    delta = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+    steps = max(1, int(abs(delta) / 0.12))
+    points = []
+    for index in range(1, steps):
+        angle = a0 + delta * index / steps
+        points.append((cx + radius * math.cos(angle), cy - radius * math.sin(angle)))
+    return points
+
+
+def _globe_ring(ring, lon0, lat0, radius, cx, cy):
+    """Visible runs of a closed ring, each closed along the limb."""
+    pts = [_sphere_point(lat, lon, lon0, lat0) for lon, lat in ring]
+    visible = [p[2] > 0 for p in pts]
+    n = len(pts)
+    if not any(visible):
+        return []
+    if all(visible):
+        return [[(cx + radius * x, cy - radius * y) for x, y, _z in pts]]
+
+    start = next(i for i in range(n) if visible[i] and not visible[i - 1])
+    runs = []
+    current = []
+    for k in range(n):
+        i = (start + k) % n
+        prev = (i - 1) % n
+        if visible[i]:
+            if not visible[prev]:
+                bx, by = _limb_point(pts[prev], pts[i])
+                current.append((cx + radius * bx, cy - radius * by))
+            current.append((cx + radius * pts[i][0], cy - radius * pts[i][1]))
+        elif visible[prev]:
+            bx, by = _limb_point(pts[prev], pts[i])
+            current.append((cx + radius * bx, cy - radius * by))
+            runs.append(current)
+            current = []
+    if current:
+        runs.append(current)
+    if not runs:
+        return []
+
+    closed = []
+    for run in runs:
+        exit_point = ((run[-1][0] - cx) / radius, -(run[-1][1] - cy) / radius)
+        entry_point = ((run[0][0] - cx) / radius, -(run[0][1] - cy) / radius)
+        closed.append(run + _limb_arc(exit_point, entry_point, radius, cx, cy))
+    return closed
+
+
+def _globe_line(line, lon0, lat0, radius, cx, cy):
+    """Visible runs of an open polyline (no limb closure)."""
+    runs = []
+    current = []
+    for lon, lat in line:
+        x, y, z = _sphere_point(lat, lon, lon0, lat0)
+        if z > 0:
+            current.append((cx + radius * x, cy - radius * y))
+        else:
+            if len(current) >= 2:
+                runs.append(current)
+            current = []
+    if len(current) >= 2:
+        runs.append(current)
+    return runs
+
+
+def _path_from_runs(runs, close, precision=0):
+    """Path data for globe runs; whole pixels keep the baked frames small."""
+    pattern = "%." + str(precision) + "f %." + str(precision) + "f"
+    parts = []
+    for run in runs:
+        if len(run) < (3 if close else 2):
+            continue
+        parts.append(
+            "M "
+            + " L ".join(pattern % (x, y) for x, y in run)
+            + (" Z" if close else "")
+        )
+    return " ".join(parts)
+
+
+def render_drift_svg(
+    cities, land, theme_name="light", width=1280, borders=None, duration=60.0
+):
+    """Flat map that slowly pans across one full width, then repeats."""
+    theme = THEMES[theme_name]
+    projection = Projection(width)
+    height = projection.height
+    layer = _flat_layers(cities, land, projection, theme, borders)
+    style = (
+        "<style>\n"
+        "@media (prefers-reduced-motion:no-preference){\n"
+        ".drift{animation:drift %(duration).1fs linear infinite}\n"
+        "@keyframes drift{from{transform:translateX(0)}to{transform:translateX(-%(width)dpx)}}\n"
+        "}\n"
+        "</style>\n"
+    ) % {"duration": duration, "width": width}
+    title = "Travel map"
+    description = (
+        "World map with red dots marking cities lived in, visited or transited "
+        "through, slowly panning eastward."
+    )
+    body = (
+        '  <g class="drift">\n'
+        + layer
+        + '    <g transform="translate(%d,0)">\n' % width
+        + layer
+        + "    </g>\n"
+        "  </g>\n"
+    )
+    return (
+        _svg_open(width, height, title, description)
+        + style
+        + '  <rect width="%d" height="%.2f" fill="%s"/>\n'
+        % (width, height, theme["ocean"])
+        + body
+        + "</svg>\n"
+    )
+
+
+def render_globe_svg(
+    cities,
+    land,
+    theme_name="dark",
+    width=640,
+    borders=None,
+    frames=24,
+    duration=18.0,
+):
+    """Orthographic globe that rotates one full turn, routes drawn on the sphere.
+
+    Frames are baked because a README SVG cannot run scripts; each frame is
+    shown for one slice of the cycle by CSS keyframes. Reduced-motion readers
+    see frame 0 only.
+    """
+    theme = THEMES[theme_name]
+    height = round(width * 1.05, 2)
+    radius = width * 0.44
+    cx = width / 2.0
+    cy = height / 2.0
+    ordered = _route_order(cities)
+    route_lines = _route_lines(ordered)
+
+    frames_markup = []
+    frame_rules = []
+    keyframes = []
+    for frame in range(frames):
+        lon0 = 360.0 * frame / frames
+        land_runs = []
+        for polygon in land["coordinates"]:
+            for ring in polygon:
+                land_runs.extend(_globe_ring(ring, lon0, GLOBE_TILT, radius, cx, cy))
+        border_runs = []
+        for line in borders or []:
+            border_runs.extend(_globe_line(line, lon0, GLOBE_TILT, radius, cx, cy))
+        route_runs = []
+        for line in route_lines:
+            route_runs.extend(_globe_line(line, lon0, GLOBE_TILT, radius, cx, cy))
+
+        dots = []
+        for city in cities:
+            x, y, z = _sphere_point(city["lat"], city["lon"], lon0, GLOBE_TILT)
+            if z > 0:
+                dots.append(
+                    '<circle cx="%.0f" cy="%.0f" r="3.2" fill="%s" stroke="%s" stroke-width="1"/>'
+                    % (cx + radius * x, cy - radius * y, theme["dot"], theme["dot_edge"])
+                )
+
+        frames_markup.append(
+            '  <g class="gf gf%d">\n'
+            '    <path d="%s" fill="%s" stroke="%s" stroke-width="0.5" fill-rule="evenodd"/>\n'
+            '    <path d="%s" fill="none" stroke="%s" stroke-width="0.5"/>\n'
+            '    <path d="%s" fill="none" stroke="%s" stroke-opacity="0.6" stroke-width="1.2"/>\n'
+            "    %s\n"
+            "  </g>\n"
+            % (
+                frame,
+                _path_from_runs(land_runs, True),
+                theme.get("globe_land", theme["land"]),
+                theme["coast"],
+                _path_from_runs(border_runs, False),
+                theme["border"],
+                _path_from_runs(route_runs, False),
+                theme["glow"],
+                "\n    ".join(dots),
+            )
+        )
+        start = frame / frames
+        end = (frame + 1) / frames
+        frame_rules.append(
+            ".gf%d{animation:g%d %gs steps(1,end) infinite}" % (frame, frame, duration)
+        )
+        keyframes.append(
+            "@keyframes g%d{0%%,%s%%{opacity:0}%s%%,%s%%{opacity:1}%s%%,100%%{opacity:0}}"
+            % (
+                frame,
+                _fmt_percent(start),
+                _fmt_percent(start),
+                _fmt_percent(end),
+                _fmt_percent(end),
+            )
+        )
+
+    style = (
+        "<style>\n"
+        ".gf{opacity:0}\n"
+        ".gf0{opacity:1}\n"
+        "@media (prefers-reduced-motion:no-preference){\n"
+        ".gf0{opacity:0}\n"
+        + "\n".join(frame_rules)
+        + "\n"
+        + "\n".join(keyframes)
+        + "\n}\n"
+        "</style>\n"
+    )
+
+    title = "Travel globe"
+    description = (
+        "Rotating globe with glowing great-circle routes between cities lived "
+        "in, visited or transited through, in chronological order."
+    )
+    return (
+        _svg_open(width, height, title, description)
+        + style
+        + "  <defs>\n"
+        '    <radialGradient id="globe-ocean" cx="35%%" cy="30%%" r="75%%">\n'
+        '      <stop offset="0%%" stop-color="%s"/>\n'
+        '      <stop offset="100%%" stop-color="%s"/>\n'
+        "    </radialGradient>\n"
+        "  </defs>\n"
+        '  <circle cx="%.0f" cy="%.0f" r="%.0f" fill="url(#globe-ocean)" '
+        'stroke="%s" stroke-width="0.8"/>\n'
+        % (theme["ocean_hi"], theme["ocean_lo"], cx, cy, radius, theme["coast"])
+        + "".join(frames_markup)
+        + "</svg>\n"
+    )
+
+
 def _read_places(path):
     with pathlib.Path(path).open(encoding="utf-8") as handle:
         document = json.load(handle)
@@ -984,6 +1266,7 @@ def command_render(args):
     document = _read_places(args.data)
     cities = document["cities"]
     land = load_land()
+    coarse = load_land_coarse()
     borders = load_borders()
     out_dir = pathlib.Path(args.out_dir)
     themes = ["light", "dark"] if args.theme == "both" else [args.theme]
@@ -1005,6 +1288,32 @@ def command_render(args):
             out.write_text(animated, encoding="utf-8")
             print(
                 f"wrote {out} ({len(cities)} cities, {len(animated)} bytes)",
+                file=sys.stderr,
+            )
+        if args.drift:
+            drift = render_drift_svg(
+                cities, land, theme, width=args.width, borders=borders
+            )
+            out = out_dir / f"worldmap-drift-{theme}.svg"
+            out.write_text(drift, encoding="utf-8")
+            print(
+                f"wrote {out} ({len(cities)} cities, {len(drift)} bytes)",
+                file=sys.stderr,
+            )
+        if args.globe:
+            globe = render_globe_svg(
+                cities,
+                coarse,
+                theme,
+                width=args.globe_width,
+                borders=borders,
+                frames=args.globe_frames,
+                duration=args.globe_duration,
+            )
+            out = out_dir / f"worldmap-globe-{theme}.svg"
+            out.write_text(globe, encoding="utf-8")
+            print(
+                f"wrote {out} ({len(cities)} cities, {len(globe)} bytes)",
                 file=sys.stderr,
             )
     return 0
@@ -1071,6 +1380,21 @@ def build_parser():
             default=90.0,
             help="seconds for one ping-pong cycle of the animated map",
         )
+        p.add_argument(
+            "--drift",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="also write worldmap-drift-<theme>.svg (default: yes)",
+        )
+        p.add_argument(
+            "--globe",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="also write worldmap-globe-<theme>.svg (default: yes)",
+        )
+        p.add_argument("--globe-width", type=int, default=640)
+        p.add_argument("--globe-frames", type=int, default=24)
+        p.add_argument("--globe-duration", type=float, default=18.0)
 
     p_import = sub.add_parser("import", help="export -> data/places.json (PII-stripped)")
     import_options(p_import)
@@ -1100,6 +1424,21 @@ def build_parser():
         default=90.0,
         help="seconds for one ping-pong cycle of the animated map",
     )
+    p_all.add_argument(
+            "--drift",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="also write worldmap-drift-<theme>.svg (default: yes)",
+        )
+    p_all.add_argument(
+            "--globe",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="also write worldmap-globe-<theme>.svg (default: yes)",
+        )
+    p_all.add_argument("--globe-width", type=int, default=640)
+    p_all.add_argument("--globe-frames", type=int, default=24)
+    p_all.add_argument("--globe-duration", type=float, default=18.0)
     p_all.set_defaults(func=command_all)
     return parser
 

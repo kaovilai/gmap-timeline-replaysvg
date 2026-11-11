@@ -1,9 +1,14 @@
 # gmap-timeline-replaysvg
 
 Turn a Google Maps **Timeline** export into a **city-level world map SVG** you can
-put in a profile README — static, or animated with a glowing replay that moves
-through the places you have lived in, visited or transited through, in
-chronological order.
+put in a profile README. Four looks, all from the same city-level data:
+
+| Mode | What it does |
+| --- | --- |
+| **static** | dots on a world map |
+| **animated** | a glowing dash ping-pongs along great-circle arcs, one hop at a time |
+| **drift** | the flat map slowly pans a full width and repeats |
+| **globe** | an orthographic globe rotates one full turn, routes drawn on the sphere |
 
 Everything runs locally. The only thing the tool ever writes is a small JSON
 file of **city names and gazetteer city centres** plus the SVGs drawn from it.
@@ -14,8 +19,11 @@ file of **city names and gazetteer city centres** plus the SVGs drawn from it.
 </picture>
 
 <sub>[Example data](examples/demo-places.json) is a fictional tour, not a real
-person's history. Static variants: [light](examples/worldmap-light.svg) ·
-[dark](examples/worldmap-dark.svg).</sub>
+person's history. More variants: [static light](examples/worldmap-light.svg) ·
+[static dark](examples/worldmap-dark.svg) ·
+[drift](examples/worldmap-drift-light.svg) ·
+[rotating globe](examples/worldmap-globe-light.svg) ·
+[globe, dark](examples/worldmap-globe-dark.svg).</sub>
 
 ## Use it on your phone
 
@@ -26,7 +34,9 @@ Open **https://github.tig.pw/gmap-timeline-replaysvg/**
    `.zip` in your phone's Files app.
 2. Tap **Choose Timeline export** and pick it. Parsing and drawing happen in the
    browser; the file never leaves the device.
-3. Download the animated (and/or static) SVGs — they land in Files.
+3. Switch between **Flat map** and **Globe** to preview both; the globe is
+   interactive (drag to spin) but preview-only. Download any of the SVGs — they
+   land in Files.
 4. Upload them to your profile repo from GitHub's mobile site, then paste the
    README snippet the page gives you.
 
@@ -67,10 +77,13 @@ No third-party packages are required (Python 3.8+):
 python3 -I -B worldmap.py all ~/Downloads/Timeline.json
 ```
 
-This writes `places.json` and four SVGs into the current directory:
+This writes `places.json` and eight SVGs (each mode in light and dark) into the
+current directory:
 
 - `worldmap-light.svg`, `worldmap-dark.svg` — static
-- `worldmap-animated-light.svg`, `worldmap-animated-dark.svg` — animated
+- `worldmap-animated-*.svg` — animated
+- `worldmap-drift-*.svg` — drifting pan
+- `worldmap-globe-*.svg` — baked rotating globe
 
 Then point your profile README at the animated pair:
 
@@ -121,8 +134,13 @@ are dropped; position/path samples use the tighter `--max-path-km` (default
   reduced-motion readers get the still map.
 - Output is deterministic: the same `places.json` renders byte-identical SVGs.
 
-Tuning: `--duration 120` slows the cycle (default 90 s), `--no-animated` writes
-only the static pair, `--theme dark` renders one theme.
+The drift variant tiles the map twice so the pan has no seam, and the globe
+bakes 24 frames (one every 15°) into a single SVG — a README image cannot run
+scripts, so the rotation has to be pre-rendered. At 640 px the globe file is
+about 750 kB; lower `--globe-frames` or `--globe-width` to shrink it.
+
+Tuning: `--duration 120` slows the animated cycle (default 90 s), `--no-animated`,
+`--no-drift` and `--no-globe` skip variants, `--theme dark` renders one theme.
 
 ## Commands and flags
 
@@ -149,12 +167,17 @@ python3 -I -B worldmap.py all ~/Downloads/Timeline.json
 | `--width` | `1280` | SVG width in pixels |
 | `--duration` | `90` | seconds per ping-pong cycle |
 | `--no-animated` | off | skip animated variants |
+| `--no-drift` | off | skip drift variants |
+| `--no-globe` | off | skip globe variants |
+| `--globe-width` | `640` | globe SVG width |
+| `--globe-frames` | `24` | baked rotation frames |
+| `--globe-duration` | `18` | seconds per globe rotation |
 
 ## Basemap data
 
 `data/` holds public-domain [Natural Earth](https://www.naturalearthdata.com/)
-data: a simplified 1:50m coastline, 1:110m country borders, and populated places
-used for city lookup. Refresh it with:
+data: a simplified 1:50m coastline (1:110m for the globe), country borders, and
+populated places used for city lookup. Refresh it with:
 
 ```sh
 python3 -I -B build-mapdata.py
@@ -168,9 +191,12 @@ python3 -I -B tests/test_worldmap.py
 
 They cover every supported export shape, coordinate parsing, PII stripping,
 same-name cities, high-latitude/antimeridian lookups, deterministic rendering,
-the animated file being self-contained, and staleness between
-`examples/demo-places.json` and the committed example SVGs. CI runs the same
-command on every push.
+the animated/globe files being self-contained, and staleness between
+`examples/demo-places.json` and the committed example SVGs.
+
+`node tests/parity.mjs` renders all eight examples with the browser module and
+asserts the bytes match the Python CLI, so a map made on the phone is identical
+to one made on a laptop. CI runs both suites on every push.
 
 ## License
 

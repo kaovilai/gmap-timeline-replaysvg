@@ -20,6 +20,9 @@ export const THEMES = {
     dot_edge: "#ffffff",
     glow: "#ff5a3c",
     halo: "#e8453c",
+    ocean_hi: "#c6e7ff",
+    ocean_lo: "#7cc3ef",
+    globe_land: "#f2efe9",
   },
   dark: {
     ocean: "#0b1a2a",
@@ -30,6 +33,9 @@ export const THEMES = {
     dot_edge: "#0b1a2a",
     glow: "#ff8f6b",
     halo: "#ff6b5e",
+    ocean_hi: "#173855",
+    ocean_lo: "#06121d",
+    globe_land: "#24405a",
   },
 };
 
@@ -602,13 +608,7 @@ function linesPath(lines, projection) {
   return parts.join(" ");
 }
 
-export function renderSvg(cities, land, themeName = "light", options = {}) {
-  const theme = THEMES[themeName];
-  const width = options.width ?? 1280;
-  const borders = options.borders ?? [];
-  const projection = new Projection(width);
-  const height = projection.height;
-
+function flatLayers(cities, land, projection, theme, borders) {
   const paths = landPaths(land, projection).join(" ");
   const borderPath = linesPath(borders, projection);
   const dots = cities
@@ -618,25 +618,282 @@ export function renderSvg(cities, land, themeName = "light", options = {}) {
       const [x, y] = projection.point(city.lat, city.lon);
       return `<circle cx="${f1(x)}" cy="${f1(y)}" r="4.2" fill="${theme.dot}" stroke="${theme.dot_edge}" stroke-width="1.2"/>`;
     });
-
-  const title = "Travel map";
-  const description =
-    "World map with red dots marking cities the owner has lived in, visited " +
-    "or transited through, generated at city level.";
   return (
-    '<?xml version="1.0" encoding="UTF-8"?>\n' +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${f2(height)}" ` +
-    `viewBox="0 0 ${width} ${f2(height)}" role="img" aria-labelledby="map-title map-desc">\n` +
-    `  <title id="map-title">${title}</title>\n` +
-    `  <desc id="map-desc">${description}</desc>\n` +
-    `  <rect width="${width}" height="${f2(height)}" fill="${theme.ocean}"/>\n` +
     `  <g fill="${theme.land}" stroke="${theme.coast}" stroke-width="0.7" fill-rule="evenodd">\n` +
     `    <path d="${paths}"/>\n` +
     "  </g>\n" +
     `  <g fill="none" stroke="${theme.border}" stroke-width="0.6">\n` +
     `    <path d="${borderPath}"/>\n` +
     "  </g>\n" +
-    `  <g>\n    ${dots.join("\n    ")}\n  </g>\n` +
+    `  <g>\n    ${dots.join("\n    ")}\n  </g>\n`
+  );
+}
+
+function svgOpen(width, height, title, description) {
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${f2(height)}" ` +
+    `viewBox="0 0 ${width} ${f2(height)}" role="img" aria-labelledby="map-title map-desc">\n` +
+    `  <title id="map-title">${title}</title>\n` +
+    `  <desc id="map-desc">${description}</desc>\n`
+  );
+}
+
+export function renderSvg(cities, land, themeName = "light", options = {}) {
+  const theme = THEMES[themeName];
+  const width = options.width ?? 1280;
+  const borders = options.borders ?? [];
+  const projection = new Projection(width);
+  const height = projection.height;
+  const title = "Travel map";
+  const description =
+    "World map with red dots marking cities the owner has lived in, visited " +
+    "or transited through, generated at city level.";
+  return (
+    svgOpen(width, height, title, description) +
+    `  <rect width="${width}" height="${f2(height)}" fill="${theme.ocean}"/>\n` +
+    flatLayers(cities, land, projection, theme, borders) +
+    "</svg>\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Drift rendering
+
+export function renderDriftSvg(cities, land, themeName = "light", options = {}) {
+  const theme = THEMES[themeName];
+  const width = options.width ?? 1280;
+  const borders = options.borders ?? [];
+  const duration = options.duration ?? 60;
+  const projection = new Projection(width);
+  const height = projection.height;
+  const layer = flatLayers(cities, land, projection, theme, borders);
+  const style =
+    "<style>\n" +
+    "@media (prefers-reduced-motion:no-preference){\n" +
+    `.drift{animation:drift ${duration.toFixed(1)}s linear infinite}\n` +
+    `@keyframes drift{from{transform:translateX(0)}to{transform:translateX(-${width}px)}}\n` +
+    "}\n" +
+    "</style>\n";
+  const title = "Travel map";
+  const description =
+    "World map with red dots marking cities lived in, visited or transited " +
+    "through, slowly panning eastward.";
+  const body =
+    '  <g class="drift">\n' +
+    layer +
+    `    <g transform="translate(${width},0)">\n` +
+    layer +
+    "    </g>\n" +
+    "  </g>\n";
+  return (
+    svgOpen(width, height, title, description) +
+    style +
+    `  <rect width="${width}" height="${f2(height)}" fill="${theme.ocean}"/>\n` +
+    body +
+    "</svg>\n"
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Globe rendering
+
+export const GLOBE_TILT = 20;
+
+export function spherePoint(lat, lon, lon0, lat0 = GLOBE_TILT) {
+  const phi = (lat * Math.PI) / 180;
+  const lam = ((lon - lon0) * Math.PI) / 180;
+  const phi0 = (lat0 * Math.PI) / 180;
+  const x = Math.cos(phi) * Math.sin(lam);
+  const y =
+    Math.cos(phi0) * Math.sin(phi) -
+    Math.sin(phi0) * Math.cos(phi) * Math.cos(lam);
+  const z =
+    Math.sin(phi0) * Math.sin(phi) +
+    Math.cos(phi0) * Math.cos(phi) * Math.cos(lam);
+  return [x, y, z];
+}
+
+export function limbPoint(a, b) {
+  const t = a[2] / (a[2] - b[2]);
+  const x = a[0] + t * (b[0] - a[0]);
+  const y = a[1] + t * (b[1] - a[1]);
+  const norm = Math.hypot(x, y) || 1;
+  return [x / norm, y / norm];
+}
+
+export function limbArc(exitPoint, entryPoint, radius, cx, cy) {
+  const a0 = Math.atan2(exitPoint[1], exitPoint[0]);
+  const a1 = Math.atan2(entryPoint[1], entryPoint[0]);
+  const delta = (((a1 - a0 + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  const steps = Math.max(1, Math.trunc(Math.abs(delta) / 0.12));
+  const points = [];
+  for (let index = 1; index < steps; index += 1) {
+    const angle = a0 + (delta * index) / steps;
+    points.push([cx + radius * Math.cos(angle), cy - radius * Math.sin(angle)]);
+  }
+  return points;
+}
+
+export function globeRing(ring, lon0, lat0, radius, cx, cy) {
+  const pts = ring.map(([lon, lat]) => spherePoint(lat, lon, lon0, lat0));
+  const visible = pts.map((p) => p[2] > 0);
+  const n = pts.length;
+  if (!visible.some(Boolean)) return [];
+  if (visible.every(Boolean)) {
+    return [pts.map(([x, y]) => [cx + radius * x, cy - radius * y])];
+  }
+  let start = 0;
+  for (let i = 0; i < n; i += 1) {
+    if (visible[i] && !visible[(i - 1 + n) % n]) {
+      start = i;
+      break;
+    }
+  }
+  const runs = [];
+  let current = [];
+  for (let k = 0; k < n; k += 1) {
+    const i = (start + k) % n;
+    const prev = (i - 1 + n) % n;
+    if (visible[i]) {
+      if (!visible[prev]) {
+        const [bx, by] = limbPoint(pts[prev], pts[i]);
+        current.push([cx + radius * bx, cy - radius * by]);
+      }
+      current.push([cx + radius * pts[i][0], cy - radius * pts[i][1]]);
+    } else if (visible[prev]) {
+      const [bx, by] = limbPoint(pts[prev], pts[i]);
+      current.push([cx + radius * bx, cy - radius * by]);
+      runs.push(current);
+      current = [];
+    }
+  }
+  if (current.length) runs.push(current);
+  if (!runs.length) return [];
+  return runs.map((run) => {
+    const exitPoint = [(run[run.length - 1][0] - cx) / radius, -(run[run.length - 1][1] - cy) / radius];
+    const entryPoint = [(run[0][0] - cx) / radius, -(run[0][1] - cy) / radius];
+    return run.concat(limbArc(exitPoint, entryPoint, radius, cx, cy));
+  });
+}
+
+export function globeLine(line, lon0, lat0, radius, cx, cy) {
+  const runs = [];
+  let current = [];
+  for (const [lon, lat] of line) {
+    const [x, y, z] = spherePoint(lat, lon, lon0, lat0);
+    if (z > 0) {
+      current.push([cx + radius * x, cy - radius * y]);
+    } else {
+      if (current.length >= 2) runs.push(current);
+      current = [];
+    }
+  }
+  if (current.length >= 2) runs.push(current);
+  return runs;
+}
+
+function pathFromRuns(runs, close, precision = 0) {
+  const parts = [];
+  for (const run of runs) {
+    if (run.length < (close ? 3 : 2)) continue;
+    parts.push(
+      "M " +
+        run.map(([x, y]) => `${x.toFixed(precision)} ${y.toFixed(precision)}`).join(" L ") +
+        (close ? " Z" : ""),
+    );
+  }
+  return parts.join(" ");
+}
+
+export function renderGlobeSvg(cities, land, themeName = "dark", options = {}) {
+  const theme = THEMES[themeName];
+  const width = options.width ?? 640;
+  const borders = options.borders ?? [];
+  const frames = options.frames ?? 24;
+  const duration = options.duration ?? 18;
+  const height = round2(width * 1.05);
+  const radius = width * 0.44;
+  const cx = width / 2;
+  const cy = height / 2;
+  const ordered = routeOrder(cities);
+  const routeLinesData = routeLines(ordered);
+
+  const framesMarkup = [];
+  const frameRules = [];
+  const keyframes = [];
+  for (let frame = 0; frame < frames; frame += 1) {
+    const lon0 = (360 * frame) / frames;
+    const landRuns = [];
+    for (const polygon of land.coordinates) {
+      for (const ring of polygon) {
+        landRuns.push(...globeRing(ring, lon0, GLOBE_TILT, radius, cx, cy));
+      }
+    }
+    const borderRuns = [];
+    for (const line of borders) {
+      borderRuns.push(...globeLine(line, lon0, GLOBE_TILT, radius, cx, cy));
+    }
+    const routeRuns = [];
+    for (const line of routeLinesData) {
+      routeRuns.push(...globeLine(line, lon0, GLOBE_TILT, radius, cx, cy));
+    }
+    const dots = [];
+    for (const city of cities) {
+      const [x, y, z] = spherePoint(city.lat, city.lon, lon0, GLOBE_TILT);
+      if (z > 0) {
+        dots.push(
+          `<circle cx="${(cx + radius * x).toFixed(0)}" cy="${(cy - radius * y).toFixed(0)}" r="3.2" fill="${theme.dot}" stroke="${theme.dot_edge}" stroke-width="1"/>`,
+        );
+      }
+    }
+    framesMarkup.push(
+      `  <g class="gf gf${frame}">\n` +
+        `    <path d="${pathFromRuns(landRuns, true)}" fill="${theme.globe_land ?? theme.land}" stroke="${theme.coast}" stroke-width="0.5" fill-rule="evenodd"/>\n` +
+        `    <path d="${pathFromRuns(borderRuns, false)}" fill="none" stroke="${theme.border}" stroke-width="0.5"/>\n` +
+        `    <path d="${pathFromRuns(routeRuns, false)}" fill="none" stroke="${theme.glow}" stroke-opacity="0.6" stroke-width="1.2"/>\n` +
+        `    ${dots.join("\n    ")}\n` +
+        "  </g>\n",
+    );
+    frameRules.push(
+      `.gf${frame}{animation:g${frame} ${duration}s steps(1,end) infinite}`,
+    );
+    keyframes.push(
+      `@keyframes g${frame}{0%,${fmtPercent(frame / frames)}%{opacity:0}${fmtPercent(
+        frame / frames,
+      )}%,${fmtPercent((frame + 1) / frames)}%{opacity:1}${fmtPercent(
+        (frame + 1) / frames,
+      )}%,100%{opacity:0}}`,
+    );
+  }
+
+  const style =
+    "<style>\n" +
+    ".gf{opacity:0}\n" +
+    ".gf0{opacity:1}\n" +
+    "@media (prefers-reduced-motion:no-preference){\n" +
+    ".gf0{opacity:0}\n" +
+    frameRules.join("\n") +
+    "\n" +
+    keyframes.join("\n") +
+    "\n}\n" +
+    "</style>\n";
+
+  const title = "Travel globe";
+  const description =
+    "Rotating globe with glowing great-circle routes between cities lived " +
+    "in, visited or transited through, in chronological order.";
+  return (
+    svgOpen(width, height, title, description) +
+    style +
+    "  <defs>\n" +
+    '    <radialGradient id="globe-ocean" cx="35%" cy="30%" r="75%">\n' +
+    `      <stop offset="0%" stop-color="${theme.ocean_hi}"/>\n` +
+    `      <stop offset="100%" stop-color="${theme.ocean_lo}"/>\n` +
+    "    </radialGradient>\n" +
+    "  </defs>\n" +
+    `  <circle cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" r="${radius.toFixed(0)}" fill="url(#globe-ocean)" stroke="${theme.coast}" stroke-width="0.8"/>\n` +
+    framesMarkup.join("") +
     "</svg>\n"
   );
 }

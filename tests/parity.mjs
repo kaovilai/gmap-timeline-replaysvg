@@ -16,6 +16,8 @@ import {
   CityIndex,
   iterSamples,
   renderAnimatedSvg,
+  renderDriftSvg,
+  renderGlobeSvg,
   renderSvg,
 } from "../js/worldmap.js";
 
@@ -24,17 +26,20 @@ const read = (path) => readFileSync(join(ROOT, path), "utf8");
 
 const cities = JSON.parse(read("examples/demo-places.json")).cities;
 const land = JSON.parse(read("data/world-land.json"));
+const coarse = JSON.parse(read("data/world-land-coarse.json"));
 const borders = JSON.parse(read("data/world-borders.json"));
 
 let checked = 0;
 for (const theme of ["light", "dark"]) {
   const variants = [
-    [`worldmap-${theme}.svg`, renderSvg],
-    [`worldmap-animated-${theme}.svg`, renderAnimatedSvg],
+    [`worldmap-${theme}.svg`, renderSvg, land],
+    [`worldmap-animated-${theme}.svg`, renderAnimatedSvg, land],
+    [`worldmap-drift-${theme}.svg`, renderDriftSvg, land],
+    [`worldmap-globe-${theme}.svg`, renderGlobeSvg, coarse],
   ];
-  for (const [name, render] of variants) {
+  for (const [name, render, geometry] of variants) {
     const expected = read(`examples/${name}`);
-    const actual = render(cities, land, theme, { borders });
+    const actual = render(cities, geometry, theme, { borders });
     if (actual !== expected) {
       let index = 0;
       while (

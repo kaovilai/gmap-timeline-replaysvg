@@ -5,8 +5,9 @@ Downloads three public-domain Natural Earth datasets, strips them down to what
 the renderer needs, simplifies coastlines and rounds coordinates, then writes
 compact files into data/:
 
-  world-land.json    coastline/land polygons (Natural Earth 1:50m land)
-  world-borders.json country boundary lines (Natural Earth 1:110m)
+  world-land.json         coastline/land polygons (Natural Earth 1:50m land)
+  world-land-coarse.json  same, 1:110m and simplified, for the spinning globe
+  world-borders.json      country boundary lines (Natural Earth 1:110m)
   cities.json        populated places used for city-level PII stripping
 
 Run this only when the upstream Natural Earth data needs refreshing; the
@@ -26,6 +27,7 @@ NE_BASE = (
     "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/"
 )
 LAND_URL = NE_BASE + "ne_50m_land.geojson"
+LAND_COARSE_URL = NE_BASE + "ne_110m_land.geojson"
 BORDERS_URL = NE_BASE + "ne_110m_admin_0_boundary_lines_land.geojson"
 PLACES_URL = NE_BASE + "ne_10m_populated_places_simple.geojson"
 
@@ -102,12 +104,12 @@ def _ring_box(ring):
     return max(xs) - min(xs), max(ys) - min(ys)
 
 
-def clean_polygon(rings):
+def clean_polygon(rings, tolerance=SIMPLIFY_DEGREES, min_box=MIN_BOX_DEGREES):
     cleaned = []
     for i, ring in enumerate(rings):
         if len(ring) < 4:
             continue
-        simplified = simplify(ring, SIMPLIFY_DEGREES)
+        simplified = simplify(ring, tolerance)
         simplified = _round_ring(simplified)
         if len(simplified) < 4:
             continue
@@ -116,7 +118,7 @@ def clean_polygon(rings):
         if i > 0 and not cleaned:
             continue
         w, h = _ring_box(simplified)
-        if i == 0 and max(w, h) < MIN_BOX_DEGREES:
+        if i == 0 and max(w, h) < min_box:
             return None
         cleaned.append(simplified)
     if not cleaned:
@@ -124,17 +126,17 @@ def clean_polygon(rings):
     return cleaned
 
 
-def build_land(raw: dict):
+def build_land(raw: dict, tolerance=SIMPLIFY_DEGREES, min_box=MIN_BOX_DEGREES):
     polygons = []
     for feature in raw["features"]:
         geom = feature.get("geometry") or {}
         if geom.get("type") == "Polygon":
-            clean = clean_polygon(geom["coordinates"])
+            clean = clean_polygon(geom["coordinates"], tolerance, min_box)
             if clean:
                 polygons.append(clean)
         elif geom.get("type") == "MultiPolygon":
             for poly in geom["coordinates"]:
-                clean = clean_polygon(poly)
+                clean = clean_polygon(poly, tolerance, min_box)
                 if clean:
                     polygons.append(clean)
     polygons.sort(key=lambda p: (round(p[0][0][1], 2), round(p[0][0][0], 2)))
@@ -206,6 +208,16 @@ def main():
     )
     points = sum(len(ring) for poly in land["coordinates"] for ring in poly)
     print(f"wrote {land_path} ({len(land['coordinates'])} polygons, {points} points)")
+
+    coarse = build_land(fetch(LAND_COARSE_URL), tolerance=0.35, min_box=0.2)
+    coarse_path = OUT_DIR / "world-land-coarse.json"
+    coarse_path.write_text(
+        json.dumps(coarse, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    coarse_points = sum(len(ring) for poly in coarse["coordinates"] for ring in poly)
+    print(
+        f"wrote {coarse_path} ({len(coarse['coordinates'])} polygons, {coarse_points} points)"
+    )
 
     borders = build_borders(fetch(BORDERS_URL))
     borders_path = OUT_DIR / "world-borders.json"

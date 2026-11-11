@@ -41,7 +41,16 @@
       <section class="result" id="result" hidden>
         <p class="summary" id="summary"></p>
 
-        <figure class="preview">
+        <div class="modes" role="tablist" aria-label="Map mode">
+          <button type="button" class="mode" data-mode="flat" role="tab" aria-selected="true">
+            Flat map
+          </button>
+          <button type="button" class="mode" data-mode="globe" role="tab" aria-selected="false">
+            Globe
+          </button>
+        </div>
+
+        <figure class="preview" id="flat-preview">
           <img id="preview" alt="Preview of the generated travel map" />
           <figcaption>
             <label for="theme">Preview theme</label>
@@ -50,6 +59,15 @@
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
+          </figcaption>
+        </figure>
+
+        <figure class="preview" id="globe-preview" hidden>
+          <canvas id="globe" aria-label="Rotating globe with routes between cities"></canvas>
+          <figcaption>
+            <button type="button" class="secondary" id="globe-toggle">Pause spin</button>
+            <span class="hint">Drag to spin. Preview only — the downloadable SVGs
+              use the flat and baked-globe variants.</span>
           </figcaption>
         </figure>
 

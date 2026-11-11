@@ -4,21 +4,45 @@
  */
 
 import {
+  arcPoints,
   buildPlaces,
   CityIndex,
+  GLOBE_TILT,
+  globeLine,
+  globeRing,
+  haversineKm,
   iterSamples,
   renderAnimatedSvg,
+  renderDriftSvg,
+  renderGlobeSvg,
   renderSvg,
+  routeOrder,
+  spherePoint,
+  THEMES,
 } from "./worldmap.js";
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
   land: null,
+  coarse: null,
   borders: null,
   cities: null,
   urls: [],
   places: null,
+  mode: "flat",
+  globe: {
+    lon0: 0,
+    speed: 14,
+    paused: false,
+    dragging: false,
+    lastX: 0,
+    raf: null,
+    last: 0,
+    ordered: null,
+    segments: null,
+    total: 0,
+  },
 };
 
 const SNIPPET = `<picture>
@@ -31,13 +55,15 @@ const SNIPPET = `<picture>
 
 async function loadData() {
   const base = new URL("../data/", import.meta.url);
-  const [cities, land, borders] = await Promise.all([
+  const [cities, land, coarse, borders] = await Promise.all([
     fetch(new URL("cities.json", base)).then((r) => r.json()),
     fetch(new URL("world-land.json", base)).then((r) => r.json()),
+    fetch(new URL("world-land-coarse.json", base)).then((r) => r.json()),
     fetch(new URL("world-borders.json", base)).then((r) => r.json()),
   ]);
   state.cities = new CityIndex(cities);
   state.land = land;
+  state.coarse = coarse;
   state.borders = borders;
 }
 
@@ -225,12 +251,26 @@ async function generate(file) {
   state.places = places;
   state.svgAnimatedLight = svgAnimatedLight;
   state.svgAnimatedDark = svgAnimatedDark;
+  buildGlobeRoute(places.cities);
 
   resetDownloads();
   addDownload("worldmap-animated-light.svg", svgAnimatedLight);
   addDownload("worldmap-animated-dark.svg", svgAnimatedDark);
   addDownload("worldmap-light.svg", svgLight);
   addDownload("worldmap-dark.svg", svgDark);
+  const previewTheme = themeForPreview();
+  addDownload(
+    `worldmap-drift-${previewTheme}.svg`,
+    renderDriftSvg(places.cities, state.land, previewTheme, {
+      borders: state.borders,
+    }),
+  );
+  addDownload(
+    `worldmap-globe-${previewTheme}.svg`,
+    renderGlobeSvg(places.cities, state.coarse, previewTheme, {
+      borders: state.borders,
+    }),
+  );
   addDownload(
     "places.json",
     JSON.stringify(places, null, 2) + "\n",
@@ -254,6 +294,212 @@ async function generate(file) {
   $("result").hidden = false;
   setStatus("Done. Preview and downloads below.");
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------------------------------------------------------------------------
+// Interactive globe (canvas preview)
+
+function buildGlobeRoute(cities) {
+  const ordered = routeOrder(cities);
+  const segments = [];
+  let total = 0;
+  for (let i = 0; i < ordered.length - 1; i += 1) {
+    const points = arcPoints(
+      [ordered[i].lat, ordered[i].lon],
+      [ordered[i + 1].lat, ordered[i + 1].lon],
+    );
+    let dist = 0;
+    for (let j = 1; j < points.length; j += 1) {
+      dist += haversineKm(
+        points[j - 1][0],
+        points[j - 1][1],
+        points[j][0],
+        points[j][1],
+      );
+    }
+    segments.push({ points, dist });
+    total += dist;
+  }
+  Object.assign(state.globe, { ordered, segments, total });
+}
+
+function cometPosition(now) {
+  const g = state.globe;
+  if (!g.total || !g.segments.length) return null;
+  const cycle = 46; // seconds for one one-way pass
+  const phase = (now / 1000) % (cycle * 2);
+  const t = phase <= cycle ? phase / cycle : 2 - phase / cycle;
+  let remaining = t * g.total;
+  for (const segment of g.segments) {
+    if (remaining <= segment.dist || segment === g.segments[g.segments.length - 1]) {
+      const fraction = segment.dist ? Math.min(1, remaining / segment.dist) : 0;
+      const index = Math.min(
+        segment.points.length - 1,
+        Math.round(fraction * (segment.points.length - 1)),
+      );
+      return segment.points[index];
+    }
+    remaining -= segment.dist;
+  }
+  return null;
+}
+
+function traceRuns(ctx, runs) {
+  for (const run of runs) {
+    run.forEach(([x, y], index) => {
+      if (index) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+  }
+}
+
+function drawGlobe(now) {
+  const canvas = $("globe");
+  if (!state.places || !state.coarse) return;
+  const cssWidth = canvas.clientWidth || 640;
+  const cssHeight = cssWidth * 1.05;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (canvas.width !== Math.round(cssWidth * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const theme = THEMES[themeForPreview()];
+  const radius = cssWidth * 0.44;
+  const cx = cssWidth / 2;
+  const cy = cssHeight / 2;
+  const g = state.globe;
+
+  const ocean = ctx.createRadialGradient(
+    cx - radius * 0.3,
+    cy - radius * 0.35,
+    radius * 0.1,
+    cx,
+    cy,
+    radius,
+  );
+  ocean.addColorStop(0, theme.ocean_hi);
+  ocean.addColorStop(1, theme.ocean_lo);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = ocean;
+  ctx.fill();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.clip();
+
+  ctx.beginPath();
+  for (const polygon of state.coarse.coordinates) {
+    for (const ring of polygon) {
+      traceRuns(ctx, globeRing(ring, g.lon0, GLOBE_TILT, radius, cx, cy));
+    }
+  }
+  ctx.fillStyle = theme.globe_land || theme.land;
+  ctx.fill("evenodd");
+  ctx.strokeStyle = theme.coast;
+  ctx.lineWidth = 0.6;
+  ctx.stroke();
+
+  ctx.beginPath();
+  for (const line of state.borders) {
+    for (const run of globeLine(line, g.lon0, GLOBE_TILT, radius, cx, cy)) {
+      run.forEach(([x, y], index) => {
+        if (index) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+      });
+    }
+  }
+  ctx.strokeStyle = theme.border;
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  ctx.beginPath();
+  for (const segment of g.segments) {
+    const line = segment.points.map(([lat, lon]) => [lon, lat]);
+    for (const run of globeLine(line, g.lon0, GLOBE_TILT, radius, cx, cy)) {
+      run.forEach(([x, y], index) => {
+        if (index) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+      });
+    }
+  }
+  ctx.strokeStyle = theme.glow;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = 1.3;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  for (const city of state.places.cities) {
+    const [x, y, z] = spherePoint(city.lat, city.lon, g.lon0, GLOBE_TILT);
+    if (z <= 0) continue;
+    ctx.beginPath();
+    ctx.arc(cx + radius * x, cy - radius * y, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = theme.dot;
+    ctx.fill();
+    ctx.strokeStyle = theme.dot_edge;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  const comet = cometPosition(now);
+  if (comet) {
+    const [x, y, z] = spherePoint(comet[0], comet[1], g.lon0, GLOBE_TILT);
+    if (z > 0) {
+      ctx.save();
+      ctx.shadowColor = theme.glow;
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = theme.glow;
+      ctx.beginPath();
+      ctx.arc(cx + radius * x, cy - radius * y, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+function globeTick(now) {
+  const g = state.globe;
+  const dt = g.last ? Math.min(0.05, (now - g.last) / 1000) : 0;
+  g.last = now;
+  if (!g.paused && !g.dragging) g.lon0 = (g.lon0 + g.speed * dt) % 360;
+  drawGlobe(now);
+  g.raf = requestAnimationFrame(globeTick);
+}
+
+function startGlobe() {
+  if (!state.globe.raf) {
+    state.globe.last = 0;
+    state.globe.raf = requestAnimationFrame(globeTick);
+  }
+}
+
+function stopGlobe() {
+  if (state.globe.raf) {
+    cancelAnimationFrame(state.globe.raf);
+    state.globe.raf = null;
+  }
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  for (const button of document.querySelectorAll(".mode")) {
+    button.setAttribute("aria-selected", String(button.dataset.mode === mode));
+  }
+  $("flat-preview").hidden = mode !== "flat";
+  $("globe-preview").hidden = mode !== "globe";
+  if (mode === "globe") {
+    startGlobe();
+    drawGlobe(performance.now());
+  } else {
+    stopGlobe();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +576,37 @@ function updateUploadLink() {
 }
 repoInput.addEventListener("input", updateUploadLink);
 updateUploadLink();
+
+for (const button of document.querySelectorAll(".mode")) {
+  button.addEventListener("click", () => setMode(button.dataset.mode));
+}
+
+const globeCanvas = $("globe");
+$("globe-toggle").addEventListener("click", () => {
+  const g = state.globe;
+  g.paused = !g.paused;
+  $("globe-toggle").textContent = g.paused ? "Resume spin" : "Pause spin";
+});
+if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  state.globe.paused = true;
+  $("globe-toggle").textContent = "Resume spin";
+}
+globeCanvas.addEventListener("pointerdown", (event) => {
+  state.globe.dragging = true;
+  state.globe.lastX = event.clientX;
+  globeCanvas.setPointerCapture(event.pointerId);
+});
+globeCanvas.addEventListener("pointermove", (event) => {
+  if (!state.globe.dragging) return;
+  const dx = event.clientX - state.globe.lastX;
+  state.globe.lastX = event.clientX;
+  state.globe.lon0 = (state.globe.lon0 - dx * 0.3) % 360;
+});
+for (const event of ["pointerup", "pointercancel"]) {
+  globeCanvas.addEventListener(event, () => {
+    state.globe.dragging = false;
+  });
+}
 
 // Warm the basemap data so the first run feels instant.
 loadData().catch(() => {
