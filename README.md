@@ -234,8 +234,12 @@ python3 -I -B worldmap.py all ~/Downloads/Timeline.json
 
 ## GIF export
 
-For sharing outside a README (Slack, a blog, a slide), render the same
-route-following globe to a high-resolution GIF:
+For a README, prefer the **animated SVG**: the same city-level map in ~0.6 MB
+at 1280 px, themeable with `<picture>`, and no Pillow or video tooling. A GIF
+of the flat map is far larger, and the globe GIF is tens of megabytes, so use
+it for sharing outside a README (Slack, a blog, a slide):
+
+Render the route-following globe to a high-resolution GIF:
 
 ```sh
 python3 -m pip install pillow   # only the GIF command needs it
