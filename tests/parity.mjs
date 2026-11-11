@@ -19,6 +19,7 @@ import {
   renderDriftSvg,
   renderGlobeSvg,
   renderSvg,
+  routeOrder,
 } from "../js/worldmap.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -100,5 +101,39 @@ for (const leaked of ["35.7796", "-78.6382", "ChIJsecret", "168.3538"]) {
 // Concatenated per-year documents, as Android exports produce.
 const concatenated = `${fixture}\n${fixture}`;
 assert.equal(iterSamples(concatenated).length, 6);
+
+// --- anonymized dates -------------------------------------------------------
+
+for (const dates of ["synthetic", "none"]) {
+  const { document: anonymized } = buildPlaces(iterSamples(fixture), new CityIndex(rows), { dates });
+  assert.equal(anonymized.dates, dates);
+  for (const city of anonymized.cities) {
+    assert.ok(!("first_year" in city), "real years must be removed");
+    assert.ok(!("last_year" in city), "real years must be removed");
+    if (dates === "synthetic") {
+      assert.equal(city.first_day, city.last_day);
+    } else {
+      assert.ok(!("first_day" in city), "no dates at all in none mode");
+    }
+  }
+  if (dates === "synthetic") {
+    const ordered = routeOrder(anonymized.cities);
+    // Chronological: Raleigh (2019) then Invercargill (2021), one day apart.
+    assert.deepEqual(
+      ordered.map((city) => [city.city, city.first_day]),
+      [
+        ["Raleigh", "2000-01-01"],
+        ["Invercargill", "2000-01-02"],
+      ],
+    );
+  }
+}
+
+// routeOrder prefers synthetic days over any stale years.
+const mixed = [
+  { city: "B", country_code: "NZ", lon: 0, first_year: 1990, first_day: "2000-01-02" },
+  { city: "A", country_code: "US", lon: 0, first_year: 2020, first_day: "2000-01-01" },
+];
+assert.deepEqual(routeOrder(mixed).map((city) => city.city), ["A", "B"]);
 
 console.log(`parity: ${checked} SVGs byte-identical to the Python output`);

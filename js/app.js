@@ -33,6 +33,7 @@ const state = {
   urls: [],
   places: null,
   mode: "flat",
+  file: null,
   globe: {
     lon0: 0,
     lat0: 20,
@@ -214,6 +215,7 @@ async function generate(file) {
     setStatus("Loading basemap data…");
     await loadData();
   }
+  state.file = file;
   setStatus(`Reading ${file.name}…`);
   await nextTick();
 
@@ -229,7 +231,9 @@ async function generate(file) {
     );
   }
 
-  const { document: places } = buildPlaces(samples, state.cities);
+  const { document: places } = buildPlaces(samples, state.cities, {
+    dates: $("dates").value,
+  });
   if (!places.cities.length) {
     throw new Error("No cities resolved from this export.");
   }
@@ -285,12 +289,21 @@ async function generate(file) {
     "application/json",
   );
 
+  const days = places.cities
+    .map((city) => city.first_day)
+    .filter((day) => day != null)
+    .sort();
   const years = places.cities
     .map((city) => city.first_year)
     .filter((year) => year != null);
-  const range = years.length
-    ? `${Math.min(...years)}–${Math.max(...years)}`
-    : "years unknown";
+  let range;
+  if (days.length) {
+    range = `${days[0]}–${days[days.length - 1]} · anonymized dates`;
+  } else if (years.length) {
+    range = `${Math.min(...years)}–${Math.max(...years)}`;
+  } else {
+    range = "dates removed";
+  }
   const countries = new Set(places.cities.map((city) => city.country)).size;
   $("summary").textContent =
     `${places.cities.length} cities in ${countries} countries · ${range} · ` +
@@ -753,6 +766,16 @@ $("theme").addEventListener("change", () => {
   if (state.places) showPreview();
 });
 
+$("dates").addEventListener("change", async () => {
+  if (!state.file) return;
+  try {
+    await generate(state.file);
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message || String(error), true);
+  }
+});
+
 $("snippet").textContent = SNIPPET;
 $("copy").addEventListener("click", async () => {
   try {
@@ -833,6 +856,7 @@ const SETTING_IDS = [
   "gif-colors",
   "gif-dither",
   "video-width",
+  "dates",
 ];
 const SETTINGS_KEY = "gmap-settings";
 

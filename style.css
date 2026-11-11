@@ -277,6 +277,19 @@ button.ghost {
   font-size: 0.95rem;
 }
 
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+.field-row .hint {
+  margin: 0;
+}
+
 .gif-controls {
   display: flex;
   flex-wrap: wrap;

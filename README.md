@@ -128,6 +128,26 @@ Samples farther than `--max-city-km` (default 75 km) from any populated place
 are dropped; position/path samples use the tighter `--max-path-km` (default
 25 km) so a highway drive does not snap to a town 70 km away.
 
+### Dates
+
+Even a year is a hint about when you were somewhere. `--dates` controls what
+`places.json` says:
+
+| Value | What is written |
+| --- | --- |
+| `real` (default) | first and last visit **year** per city |
+| `synthetic` | no years; each city gets a fake `first_day`/`last_day` (same day) exactly one day after the previous city in route order, starting at `--date-base` (default `2000-01-01`) |
+| `none` | no date fields at all |
+
+Synthetic dates keep the animated route in chronological order while publishing
+nothing real about timing — the recommended mode for a public profile repo.
+The browser page exposes the same choice ("Dates in places.json").
+
+```sh
+python3 -I -B worldmap.py import ~/Downloads/Timeline.json \
+  --dates synthetic --out data/places.json
+```
+
 ## The animated variant
 
 - Faint **great-circle arcs** connect cities in chronological order (by first
@@ -194,6 +214,8 @@ python3 -I -B worldmap.py all ~/Downloads/Timeline.json
 | `--max-city-km` | `75` | visit cutoff from the nearest populated place |
 | `--max-path-km` | `25` | cutoff for dense position/path samples |
 | `--min-visits` | `1` | drop cities with fewer visits |
+| `--dates` | `real` | `real`, `synthetic` (fake days one apart) or `none` |
+| `--date-base` | `2000-01-01` | first synthetic day |
 | `--theme` | `both` | `light`, `dark` or `both` |
 | `--width` | `1280` | SVG width in pixels |
 | `--duration` | `90` | seconds per ping-pong cycle |

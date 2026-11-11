@@ -72,6 +72,16 @@
           </button>
         </div>
 
+        <p class="field-row">
+          <label for="dates">Dates in places.json</label>
+          <select id="dates">
+            <option value="real">Keep years</option>
+            <option value="synthetic">Anonymize: one day apart</option>
+            <option value="none">Remove</option>
+          </select>
+          <span class="hint">Anonymizing keeps route order but replaces real years with fake days.</span>
+        </p>
+
         <figure class="preview" id="flat-preview">
           <img id="preview" alt="Preview of the generated travel map" />
           <figcaption>

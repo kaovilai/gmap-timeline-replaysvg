@@ -203,6 +203,50 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_import(document)
 
+    def test_dates_synthetic_replaces_years_with_consecutive_days(self):
+        document = android_export(
+            [
+                visit_segment("2019-06-01T10:00:00.000-04:00", "geo:35.7796,-78.6382"),
+                visit_segment("2017-05-01T10:00:00.000+01:00", "geo:51.5000,-0.1200"),
+                visit_segment("2021-03-01T10:00:00.000+13:00", "geo:-46.4132,168.3538"),
+            ]
+        )
+        result = self.run_import(document, extra=("--dates", "synthetic"))
+        self.assertEqual(result["dates"], "synthetic")
+        cities = result["cities"]
+        for city in cities:
+            self.assertNotIn("first_year", city)
+            self.assertNotIn("last_year", city)
+            self.assertEqual(city["first_day"], city["last_day"])
+        # Route order is chronological: Raleigh (2019), London (2017),
+        # Invercargill (2021) -> London, Raleigh, Invercargill, one day apart.
+        ordered = WM._route_order(cities)
+        self.assertEqual(
+            [c["city"] for c in ordered], ["London", "Raleigh", "Invercargill"]
+        )
+        self.assertEqual(
+            [c["first_day"] for c in ordered],
+            ["2000-01-01", "2000-01-02", "2000-01-03"],
+        )
+
+    def test_dates_none_removes_dates_entirely(self):
+        document = android_export(
+            [visit_segment("2019-06-01T10:00:00.000-04:00", "geo:35.7796,-78.6382")]
+        )
+        result = self.run_import(document, extra=("--dates", "none"))
+        self.assertEqual(result["dates"], "none")
+        city = result["cities"][0]
+        for key in ("first_year", "last_year", "first_day", "last_day"):
+            self.assertNotIn(key, city)
+
+    def test_dates_real_keeps_years(self):
+        document = android_export(
+            [visit_segment("2019-06-01T10:00:00.000-04:00", "geo:35.7796,-78.6382")]
+        )
+        result = self.run_import(document)
+        self.assertEqual(result["dates"], "real")
+        self.assertEqual(result["cities"][0]["first_year"], 2019)
+
     def test_min_visits_filter(self):
         document = android_export(
             [
