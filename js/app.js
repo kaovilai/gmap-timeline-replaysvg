@@ -3,9 +3,11 @@
  * downloads. All parsing and rendering happens in this tab via js/worldmap.js.
  */
 
+import { buildPalette, encodeGif, indexFrame } from "./gif.js";
 import {
   arcPoints,
   buildPlaces,
+  cameraAt,
   CityIndex,
   globeLine,
   globeRing,
@@ -16,6 +18,7 @@ import {
   renderGlobeSvg,
   renderSvg,
   routeOrder,
+  routePointAt,
   spherePoint,
   THEMES,
 } from "./worldmap.js";
@@ -355,26 +358,15 @@ function traceRuns(ctx, runs) {
   }
 }
 
-function drawGlobe(now) {
-  const canvas = $("globe");
-  if (!state.places || !state.coarse) return;
-  const cssWidth = canvas.clientWidth || 640;
-  const cssHeight = cssWidth * 1.05;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  if (canvas.width !== Math.round(cssWidth * dpr)) {
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
-  }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssWidth, cssHeight);
+function drawGlobeScene(ctx, width, height, lon0, lat0, cities, options = {}) {
+  const theme = options.theme || THEMES[themeForPreview()];
+  const comet = options.comet || null;
+  const scale = width / 640;
+  const radius = width * 0.44;
+  const cx = width / 2;
+  const cy = height / 2;
 
-  const theme = THEMES[themeForPreview()];
-  const radius = cssWidth * 0.44;
-  const cx = cssWidth / 2;
-  const cy = cssHeight / 2;
-  const g = state.globe;
-
+  ctx.clearRect(0, 0, width, height);
   const ocean = ctx.createRadialGradient(
     cx - radius * 0.3,
     cy - radius * 0.35,
@@ -398,18 +390,18 @@ function drawGlobe(now) {
   ctx.beginPath();
   for (const polygon of state.coarse.coordinates) {
     for (const ring of polygon) {
-      traceRuns(ctx, globeRing(ring, g.lon0, g.lat0, radius, cx, cy));
+      traceRuns(ctx, globeRing(ring, lon0, lat0, radius, cx, cy));
     }
   }
   ctx.fillStyle = theme.globe_land || theme.land;
   ctx.fill("evenodd");
   ctx.strokeStyle = theme.coast;
-  ctx.lineWidth = 0.6;
+  ctx.lineWidth = Math.max(0.6, 0.6 * scale);
   ctx.stroke();
 
   ctx.beginPath();
   for (const line of state.borders) {
-    for (const run of globeLine(line, g.lon0, g.lat0, radius, cx, cy)) {
+    for (const run of globeLine(line, lon0, lat0, radius, cx, cy)) {
       run.forEach(([x, y], index) => {
         if (index) ctx.lineTo(x, y);
         else ctx.moveTo(x, y);
@@ -417,13 +409,13 @@ function drawGlobe(now) {
     }
   }
   ctx.strokeStyle = theme.border;
-  ctx.lineWidth = 0.5;
+  ctx.lineWidth = Math.max(0.5, 0.5 * scale);
   ctx.stroke();
 
   ctx.beginPath();
-  for (const segment of g.segments) {
+  for (const segment of state.globe.segments) {
     const line = segment.points.map(([lat, lon]) => [lon, lat]);
-    for (const run of globeLine(line, g.lon0, g.lat0, radius, cx, cy)) {
+    for (const run of globeLine(line, lon0, lat0, radius, cx, cy)) {
       run.forEach(([x, y], index) => {
         if (index) ctx.lineTo(x, y);
         else ctx.moveTo(x, y);
@@ -432,37 +424,127 @@ function drawGlobe(now) {
   }
   ctx.strokeStyle = theme.glow;
   ctx.globalAlpha = 0.7;
-  ctx.lineWidth = 1.3;
+  ctx.lineWidth = Math.max(1.2, 1.3 * scale);
   ctx.stroke();
   ctx.globalAlpha = 1;
 
-  for (const city of state.places.cities) {
-    const [x, y, z] = spherePoint(city.lat, city.lon, g.lon0, g.lat0);
+  for (const city of cities) {
+    const [x, y, z] = spherePoint(city.lat, city.lon, lon0, lat0);
     if (z <= 0) continue;
     ctx.beginPath();
-    ctx.arc(cx + radius * x, cy - radius * y, 3.2, 0, Math.PI * 2);
+    ctx.arc(cx + radius * x, cy - radius * y, Math.max(3, 3.2 * scale), 0, Math.PI * 2);
     ctx.fillStyle = theme.dot;
     ctx.fill();
     ctx.strokeStyle = theme.dot_edge;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = Math.max(1, scale);
     ctx.stroke();
   }
 
-  const comet = cometPosition(now);
   if (comet) {
-    const [x, y, z] = spherePoint(comet[0], comet[1], g.lon0, g.lat0);
+    const [x, y, z] = spherePoint(comet[0], comet[1], lon0, lat0);
     if (z > 0) {
       ctx.save();
       ctx.shadowColor = theme.glow;
-      ctx.shadowBlur = 16;
+      ctx.shadowBlur = 16 * scale;
       ctx.fillStyle = theme.glow;
       ctx.beginPath();
-      ctx.arc(cx + radius * x, cy - radius * y, 4.5, 0, Math.PI * 2);
+      ctx.arc(cx + radius * x, cy - radius * y, Math.max(4, 4.5 * scale), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
   }
   ctx.restore();
+}
+
+function drawGlobe(now) {
+  const canvas = $("globe");
+  if (!state.places || !state.coarse) return;
+  const cssWidth = canvas.clientWidth || 640;
+  const cssHeight = cssWidth * 1.05;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (canvas.width !== Math.round(cssWidth * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawGlobeScene(ctx, cssWidth, cssHeight, state.globe.lon0, state.globe.lat0, state.places.cities, {
+    comet: cometPosition(state.globe.time),
+  });
+}
+
+async function exportGif() {
+  if (!state.places || !state.globe.segments) return;
+  const width = Number($("gif-width").value) || 480;
+  const fps = Number($("gif-fps").value) || 12;
+  const duration = 16;
+  const perDirection = Math.max(2, Math.round((fps * duration) / 2));
+  const height = Math.round(width * 1.05);
+  const supersample = 2;
+  const big = document.createElement("canvas");
+  big.width = width * supersample;
+  big.height = height * supersample;
+  const bigCtx = big.getContext("2d");
+  const small = document.createElement("canvas");
+  small.width = width;
+  small.height = height;
+  const smallCtx = small.getContext("2d");
+  const button = $("gif-export");
+  const status = $("gif-status");
+  const theme = THEMES[themeForPreview()];
+  button.disabled = true;
+  let palette = null;
+  const cache = new Map();
+  const forward = [];
+  try {
+    for (let index = 0; index < perDirection; index += 1) {
+      const progress = perDirection > 1 ? index / (perDirection - 1) : 0;
+      const camera =
+        cameraAt(state.globe.segments, state.globe.total, progress) ?? [0, 20];
+      const point = routePointAt(state.globe.segments, state.globe.total, progress);
+      bigCtx.setTransform(1, 0, 0, 1, 0, 0);
+      drawGlobeScene(
+        bigCtx,
+        big.width,
+        big.height,
+        camera[0],
+        camera[1],
+        state.places.cities,
+        { comet: point, theme },
+      );
+      smallCtx.clearRect(0, 0, width, height);
+      smallCtx.drawImage(big, 0, 0, width, height);
+      const rgba = smallCtx.getImageData(0, 0, width, height).data;
+      if (!palette) palette = buildPalette(rgba, 128);
+      forward.push(indexFrame(rgba, palette, cache));
+      status.textContent = `Rendering ${index + 1}/${perDirection}…`;
+      if (index % 3 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    status.textContent = "Encoding GIF…";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const frames = forward.concat(forward.slice(0, -1).reverse());
+    const bytes = encodeGif({
+      width,
+      height,
+      frames,
+      palette,
+      delayMs: 1000 / fps,
+    });
+    const blob = new Blob([bytes], { type: "image/gif" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `worldmap-globe-${width}.gif`;
+    link.click();
+    status.textContent =
+      `GIF ready · ${(blob.size / 1048576).toFixed(1)} MB · ` +
+      `${frames.length} frames`;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    status.textContent = `GIF failed: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function followCamera(dt) {
@@ -598,6 +680,8 @@ updateUploadLink();
 for (const button of document.querySelectorAll(".mode")) {
   button.addEventListener("click", () => setMode(button.dataset.mode));
 }
+
+$("gif-export").addEventListener("click", exportGif);
 
 const globeCanvas = $("globe");
 $("globe-toggle").addEventListener("click", () => {

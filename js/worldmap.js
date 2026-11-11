@@ -980,6 +980,22 @@ export function routeSegments(cities) {
   return { segments, total };
 }
 
+export function routePointAt(segments, total, progress) {
+  if (!segments.length || total <= 0) return null;
+  let target = progress * total;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const last = index === segments.length - 1;
+    if (target <= segment.distance || last) {
+      const fraction = segment.distance ? Math.min(1, target / segment.distance) : 0;
+      const step = Math.round(fraction * (segment.points.length - 1));
+      return segment.points[Math.min(segment.points.length - 1, step)];
+    }
+    target -= segment.distance;
+  }
+  return null;
+}
+
 export function cameraAt(segments, total, progress) {
   if (!segments.length || total <= 0) return null;
   let target = progress * total;

@@ -35,8 +35,9 @@ Open **https://github.tig.pw/gmap-timeline-replaysvg/**
 2. Tap **Choose Timeline export** and pick it. Parsing and drawing happen in the
    browser; the file never leaves the device.
 3. Switch between **Flat map** and **Globe** to preview both; the globe is
-   interactive (drag to spin) but preview-only. Download any of the SVGs — they
-   land in Files.
+   interactive (drag to spin). Download any of the SVGs, or **Download GIF** to
+   render an animated GIF of the globe in the browser — the encoder is bundled,
+   so no upload and no dependencies. Everything lands in Files.
 4. Upload them to your profile repo from GitHub's mobile site, then paste the
    README snippet the page gives you.
 
@@ -220,6 +221,11 @@ python3 -I -B worldmap.py gif places.json --out travel.gif \
 
 The GIF uses the same palette across frames so delta compression stays
 effective; dithering is off, which keeps flat colours clean and the file small.
+
+The browser page does the same thing without Pillow: `js/gif.js` is a small
+GIF89a encoder (median-cut palette, LZW, animation) that renders the globe from
+the canvas, so you can produce a GIF on the phone with no upload. Pick the width
+and fps on the page; 360 px / 8 fps / 16 s gives about 1.4 MB at 127 frames.
 
 ## Basemap data
 

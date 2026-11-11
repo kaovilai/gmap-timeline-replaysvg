@@ -66,10 +66,26 @@
           <canvas id="globe" aria-label="Rotating globe with routes between cities"></canvas>
           <figcaption>
             <button type="button" class="secondary" id="globe-toggle">Pause spin</button>
-            <span class="hint">Follows the route; drag to look around. Preview
-              only — the downloadable SVGs use the flat and baked-globe
-              variants.</span>
+            <span class="hint">Follows the route; drag to look around.</span>
           </figcaption>
+          <div class="gif-controls">
+            <label for="gif-width">GIF width</label>
+            <select id="gif-width">
+              <option value="360">360</option>
+              <option value="480" selected>480</option>
+              <option value="720">720</option>
+            </select>
+            <label for="gif-fps">fps</label>
+            <select id="gif-fps">
+              <option value="8">8</option>
+              <option value="12" selected>12</option>
+              <option value="20">20</option>
+            </select>
+            <button type="button" class="secondary" id="gif-export">
+              Download GIF
+            </button>
+            <span class="hint" id="gif-status"></span>
+          </div>
         </figure>
 
         <h2>Download</h2>

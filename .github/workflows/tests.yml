@@ -21,3 +21,5 @@ jobs:
         run: python3 -I -B tests/test_worldmap.py
       - name: Check browser and Python rendering parity
         run: node tests/parity.mjs
+      - name: Check the GIF encoder round-trips
+        run: node tests/gif.mjs
