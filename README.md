@@ -212,20 +212,25 @@ python3 -I -B worldmap.py gif places.json --out travel.gif \
 
 - `--width` is the output width; frames are supersampled 2× before downscaling,
   so 1080 is crisp on retina screens (`--supersample` to change).
-- `--fps` sets the playback rate; frames = `fps × duration / 2` forward, then
-  reversed for a seamless loop.
-- `--colors` (default 128) trades palette size for file size; flat map colours
-  survive 64 colours well.
-- 640 px / 12 fps / 24 s produces 286 frames and a ~6.7 MB GIF in about six
+- `--fps` sets the playback rate, capped at **50**: GIF stores frame delays in
+  hundredths of a second, and browsers clamp anything under 20 ms up to 100 ms,
+  so 2 cs (50 fps) is the format's hard ceiling. True 60 fps needs video — the
+  browser page records the live globe to WebM.
+- `--colors` (default 256) trades palette fidelity for file size; 128 roughly
+  halves the bytes. `--dither` adds Floyd–Steinberg dithering, which smooths the
+  ocean gradient at the cost of a noticeably larger file — flat colours are
+  clean without it.
+- Frames = `fps × duration / 2` forward, then reversed for a seamless loop.
+- 640 px / 12 fps / 24 s produces 286 frames and a ~7 MB GIF in about six
   seconds. 1080 px / 20 fps is around 30 MB.
 
 The GIF uses the same palette across frames so delta compression stays
-effective; dithering is off, which keeps flat colours clean and the file small.
+effective.
 
 The browser page does the same thing without Pillow: `js/gif.js` is a small
 GIF89a encoder (median-cut palette, LZW, animation) that renders the globe from
-the canvas, so you can produce a GIF on the phone with no upload. Pick the width
-and fps on the page; 360 px / 8 fps / 16 s gives about 1.4 MB at 127 frames.
+the canvas, so you can produce a GIF on the phone with no upload. Pick the
+width, fps (up to 50), length, colour count and dithering on the page.
 
 ## Basemap data
 

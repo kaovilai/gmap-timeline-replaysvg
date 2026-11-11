@@ -1290,7 +1290,8 @@ def render_globe_gif(
     duration=24.0,
     borders=None,
     supersample=2,
-    colors=128,
+    colors=256,
+    dither=False,
 ):
     """Write a ping-pong animated GIF of the following globe.
 
@@ -1390,11 +1391,14 @@ def render_globe_gif(
         return frame.resize((out_width, out_height), Image.LANCZOS)
 
     # One shared palette across frames keeps GIF delta compression effective.
+    # Dithering smooths the ocean gradient at the cost of file size, so it is
+    # opt-in.
+    dither_mode = Image.FLOYDSTEINBERG if dither else Image.NONE
     first = render_frame(0.0)
     palette = first.quantize(colors=colors, method=Image.MEDIANCUT)
-    forward = [first.quantize(palette=palette, dither=Image.NONE)] + [
+    forward = [first.quantize(palette=palette, dither=dither_mode)] + [
         render_frame(index / (per_direction - 1)).quantize(
-            palette=palette, dither=Image.NONE
+            palette=palette, dither=dither_mode
         )
         for index in range(1, per_direction)
     ]
@@ -1499,23 +1503,33 @@ def command_gif(args):
     cities = document["cities"]
     land = load_land_coarse()
     borders = load_borders()
+    # GIF delays are whole hundredths of a second; 2 cs (50 fps) is the floor
+    # browsers honour, so anything faster is clamped, not truncated.
+    fps = min(args.fps, 50.0)
+    if args.fps > 50.0:
+        print(
+            "note: GIF cannot exceed 50 fps; using 50. "
+            "Use the browser page's video export for true 60 fps.",
+            file=sys.stderr,
+        )
     frames = render_globe_gif(
         cities,
         land,
         args.theme,
         width=args.width,
-        fps=args.fps,
+        fps=fps,
         duration=args.duration,
         borders=borders,
         supersample=args.supersample,
         colors=args.colors,
+        dither=args.dither,
     )
     out = pathlib.Path(args.out)
     frames[0].save(
         out,
         save_all=True,
         append_images=frames[1:],
-        duration=max(20, int(round(1000.0 / args.fps))),
+        duration=max(20, int(round(1000.0 / fps))),
         loop=0,
         optimize=True,
         disposal=2,
@@ -1629,7 +1643,12 @@ def build_parser():
     )
     p_gif.add_argument("--theme", choices=["light", "dark"], default="dark")
     p_gif.add_argument("--supersample", type=int, default=2)
-    p_gif.add_argument("--colors", type=int, default=128, help="GIF palette size")
+    p_gif.add_argument("--colors", type=int, default=256, help="GIF palette size")
+    p_gif.add_argument(
+        "--dither",
+        action="store_true",
+        help="Floyd-Steinberg dithering (smoother gradients, larger file)",
+    )
     p_gif.set_defaults(func=command_gif)
 
     p_all = sub.add_parser("all", help="import then render")

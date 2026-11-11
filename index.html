@@ -69,7 +69,7 @@
             <span class="hint">Follows the route; drag to look around.</span>
           </figcaption>
           <div class="gif-controls">
-            <label for="gif-width">GIF width</label>
+            <label for="gif-width">Width</label>
             <select id="gif-width">
               <option value="360">360</option>
               <option value="480" selected>480</option>
@@ -77,15 +77,49 @@
             </select>
             <label for="gif-fps">fps</label>
             <select id="gif-fps">
-              <option value="8">8</option>
-              <option value="12" selected>12</option>
-              <option value="20">20</option>
+              <option value="12">12</option>
+              <option value="24">24</option>
+              <option value="50">50 (GIF max)</option>
             </select>
+            <label for="gif-duration">Length</label>
+            <select id="gif-duration">
+              <option value="8">8 s</option>
+              <option value="16" selected>16 s</option>
+              <option value="24">24 s</option>
+            </select>
+            <label for="gif-colors">Colors</label>
+            <select id="gif-colors">
+              <option value="128">128</option>
+              <option value="256" selected>256</option>
+            </select>
+            <label class="check">
+              <input type="checkbox" id="gif-dither" /> dither
+            </label>
             <button type="button" class="secondary" id="gif-export">
               Download GIF
             </button>
             <span class="hint" id="gif-status"></span>
           </div>
+          <p class="hint">
+            GIF cannot exceed 50 fps: delays are stored in hundredths of a
+            second, and browsers clamp anything under 20 ms up to 100 ms. For
+            true 60 fps use the video export or the live globe.
+          </p>
+          <div class="gif-controls">
+            <label for="video-width">Video width</label>
+            <select id="video-width">
+              <option value="720">720</option>
+              <option value="1080" selected>1080</option>
+            </select>
+            <button type="button" class="secondary" id="video-export">
+              Download 60 fps video
+            </button>
+            <span class="hint" id="video-status"></span>
+          </div>
+          <p class="hint">
+            Video records the live globe (60 fps) and takes 16 seconds. WebM
+            plays in browsers and chat apps; GitHub READMEs cannot embed it.
+          </p>
         </figure>
 
         <h2>Download</h2>

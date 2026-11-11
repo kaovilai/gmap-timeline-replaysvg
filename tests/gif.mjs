@@ -164,4 +164,38 @@ for (let i = 0; i < width * height; i += 1) {
   assert.equal(decoded[1][i], indicesB[i], `frame B pixel ${i}`);
 }
 
+// Dithering a frame whose colours already match the palette produces zero
+// error, so the indices must be identical to the undithered mapping.
+const dithered = indexFrame(frameA, palette, new Map(), {
+  dither: true,
+  width,
+});
+assert.deepEqual(dithered, indicesA);
+
+// Frame delays are centiseconds with a 2 cs floor (the 50 fps GIF ceiling).
+const delayOf = (bytes) => {
+  const packed = bytes[10];
+  const tableSize = 1 << ((packed & 0x07) + 1);
+  let at = 13 + tableSize * 3;
+  while (at < bytes.length && bytes[at] !== 0x3b) {
+    if (bytes[at] === 0x21) {
+      if (bytes[at + 1] === 0xf9) return bytes[at + 4] | (bytes[at + 5] << 8);
+      at += 2;
+      for (;;) {
+        const size = bytes[at];
+        at += 1;
+        if (!size) break;
+        at += size;
+      }
+      continue;
+    }
+    break; // image descriptor reached before any graphic control
+  }
+  throw new Error("no graphic control extension found");
+};
+const slow = encodeGif({ width, height, frames: [indicesA], palette, delayMs: 100 });
+assert.equal(delayOf(slow), 10);
+const fast = encodeGif({ width, height, frames: [indicesA], palette, delayMs: 1000 / 60 });
+assert.equal(delayOf(fast), 2);
+
 console.log(`gif: ${gif.length} bytes, ${decoded.length} frames round-tripped`);

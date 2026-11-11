@@ -3,7 +3,7 @@
  * downloads. All parsing and rendering happens in this tab via js/worldmap.js.
  */
 
-import { buildPalette, encodeGif, indexFrame } from "./gif.js";
+import { buildPalette, createGifWriter, indexFrame } from "./gif.js";
 import {
   arcPoints,
   buildPlaces,
@@ -476,8 +476,12 @@ function drawGlobe(now) {
 async function exportGif() {
   if (!state.places || !state.globe.segments) return;
   const width = Number($("gif-width").value) || 480;
-  const fps = Number($("gif-fps").value) || 12;
-  const duration = 16;
+  const requestedFps = Number($("gif-fps").value) || 12;
+  // GIF stores hundredths of a second; below 2 cs browsers clamp to 10 fps.
+  const fps = Math.min(50, requestedFps);
+  const duration = Number($("gif-duration").value) || 16;
+  const colors = Number($("gif-colors").value) || 256;
+  const dither = $("gif-dither").checked;
   const perDirection = Math.max(2, Math.round((fps * duration) / 2));
   const height = Math.round(width * 1.05);
   const supersample = 2;
@@ -515,36 +519,131 @@ async function exportGif() {
       smallCtx.clearRect(0, 0, width, height);
       smallCtx.drawImage(big, 0, 0, width, height);
       const rgba = smallCtx.getImageData(0, 0, width, height).data;
-      if (!palette) palette = buildPalette(rgba, 128);
-      forward.push(indexFrame(rgba, palette, cache));
-      status.textContent = `Rendering ${index + 1}/${perDirection}…`;
+      if (!palette) palette = buildPalette(rgba, colors);
+      forward.push(indexFrame(rgba, palette, cache, { dither, width }));
+      status.textContent =
+        `Rendering ${index + 1}/${perDirection}…` +
+        (requestedFps > 50 ? " (GIF caps at 50 fps)" : "");
       if (index % 3 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     }
     status.textContent = "Encoding GIF…";
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const frames = forward.concat(forward.slice(0, -1).reverse());
-    const bytes = encodeGif({
+    const writer = createGifWriter({
       width,
       height,
-      frames,
       palette,
       delayMs: 1000 / fps,
     });
+    for (const frame of forward) writer.addFrame(frame);
+    for (let index = forward.length - 2; index > 0; index -= 1) {
+      writer.addFrame(forward[index]);
+    }
+    const bytes = writer.finish();
     const blob = new Blob([bytes], { type: "image/gif" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `worldmap-globe-${width}.gif`;
+    link.download = `worldmap-globe-${width}-${fps}fps.gif`;
     link.click();
     status.textContent =
       `GIF ready · ${(blob.size / 1048576).toFixed(1)} MB · ` +
-      `${frames.length} frames`;
+      `${forward.length * 2 - 1} frames · ${fps} fps`;
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (error) {
     status.textContent = `GIF failed: ${error.message}`;
   } finally {
     button.disabled = false;
   }
+}
+
+function pickVideoMime() {
+  if (typeof window.MediaRecorder === "undefined") return null;
+  const candidates = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4",
+  ];
+  for (const type of candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return null;
+}
+
+async function exportVideo() {
+  if (!state.places || !state.globe.segments) return;
+  const mime = pickVideoMime();
+  const button = $("video-export");
+  const status = $("video-status");
+  if (!mime) {
+    status.textContent = "This browser cannot record video; use the GIF export.";
+    return;
+  }
+  const width = Number($("video-width").value) || 1080;
+  const height = Math.round(width * 1.05);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const theme = THEMES[themeForPreview()];
+
+  let stream;
+  try {
+    stream = canvas.captureStream(60);
+  } catch (error) {
+    status.textContent = "This browser cannot capture the canvas.";
+    return;
+  }
+  const recorder = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: 8_000_000,
+  });
+  const chunks = [];
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size) chunks.push(event.data);
+  };
+  const stopped = new Promise((resolve) => {
+    recorder.onstop = resolve;
+  });
+
+  button.disabled = true;
+  recorder.start(250);
+  const total = 16;
+  const start = performance.now();
+  await new Promise((resolve) => {
+    function tick(now) {
+      const elapsed = Math.min(total, (now - start) / 1000);
+      const phase = (elapsed % (total * 2)) / total;
+      const progress = phase <= 1 ? phase : 2 - phase;
+      const camera =
+        cameraAt(state.globe.segments, state.globe.total, progress) ?? [0, 20];
+      const point = routePointAt(state.globe.segments, state.globe.total, progress);
+      drawGlobeScene(ctx, width, height, camera[0], camera[1], state.places.cities, {
+        comet: point,
+        theme,
+      });
+      status.textContent = `Recording ${elapsed.toFixed(1)}s / ${total}s…`;
+      if (elapsed >= total) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+  recorder.stop();
+  await stopped;
+
+  const blob = new Blob(chunks, { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `worldmap-globe-${width}-60fps.webm`;
+  link.click();
+  status.textContent =
+    `Video ready · ${(blob.size / 1048576).toFixed(1)} MB · ${mime.split(";")[0]}`;
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  button.disabled = false;
 }
 
 function followCamera(dt) {
@@ -682,6 +781,7 @@ for (const button of document.querySelectorAll(".mode")) {
 }
 
 $("gif-export").addEventListener("click", exportGif);
+$("video-export").addEventListener("click", exportVideo);
 
 const globeCanvas = $("globe");
 $("globe-toggle").addEventListener("click", () => {

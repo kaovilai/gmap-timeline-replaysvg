@@ -213,78 +213,133 @@ export function buildPalette(rgba, maxColors = 128) {
   });
 }
 
-/** Map an RGBA frame to palette indices, with a 5-bit nearest-colour cache. */
-export function indexFrame(rgba, palette, cache = new Map()) {
-  const indices = new Uint8Array(rgba.length / 4);
-  for (let i = 0, p = 0; i < rgba.length; i += 4, p += 1) {
-    const r = rgba[i];
-    const g = rgba[i + 1];
-    const b = rgba[i + 2];
-    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
-    let index = cache.get(key);
-    if (index === undefined) {
-      let best = 0;
-      let bestDistance = Infinity;
-      for (let c = 0; c < palette.length; c += 1) {
-        const [pr, pg, pb] = palette[c];
-        const dr = r - pr;
-        const dg = g - pg;
-        const db = b - pb;
-        const distance = dr * dr + dg * dg + db * db;
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = c;
-        }
-      }
-      index = best;
-      cache.set(key, index);
+const clampByte = (value) => (value < 0 ? 0 : value > 255 ? 255 : value);
+
+function nearestIndex(r, g, b, palette, cache) {
+  const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+  let index = cache.get(key);
+  if (index !== undefined) return index;
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let c = 0; c < palette.length; c += 1) {
+    const [pr, pg, pb] = palette[c];
+    const dr = r - pr;
+    const dg = g - pg;
+    const db = b - pb;
+    const distance = dr * dr + dg * dg + db * db;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = c;
     }
-    indices[p] = index;
+  }
+  cache.set(key, best);
+  return best;
+}
+
+/**
+ * Map an RGBA frame to palette indices. With `dither`, a Floyd-Steinberg error
+ * pass smooths gradients (the ocean dome); it costs compression, so it is opt-in.
+ */
+export function indexFrame(rgba, palette, cache = new Map(), options = {}) {
+  const indices = new Uint8Array(rgba.length / 4);
+  const width = options.width || 0;
+  const dither = Boolean(options.dither) && width > 0 && palette.length > 1;
+  if (!dither) {
+    for (let i = 0, p = 0; i < rgba.length; i += 4, p += 1) {
+      indices[p] = nearestIndex(rgba[i], rgba[i + 1], rgba[i + 2], palette, cache);
+    }
+    return indices;
+  }
+
+  const height = Math.floor(rgba.length / 4 / width);
+  const error = new Float32Array(width * height * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const p = y * width + x;
+      const i = p * 4;
+      const r = clampByte(rgba[i] + error[p * 3]);
+      const g = clampByte(rgba[i + 1] + error[p * 3 + 1]);
+      const b = clampByte(rgba[i + 2] + error[p * 3 + 2]);
+      const index = nearestIndex(r | 0, g | 0, b | 0, palette, cache);
+      indices[p] = index;
+      const [pr, pg, pb] = palette[index];
+      const er = r - pr;
+      const eg = g - pg;
+      const eb = b - pb;
+      const spread = (dx, dy, weight) => {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= width || ny >= height) return;
+        const q = (ny * width + nx) * 3;
+        error[q] += er * weight;
+        error[q + 1] += eg * weight;
+        error[q + 2] += eb * weight;
+      };
+      spread(1, 0, 7 / 16);
+      spread(-1, 1, 3 / 16);
+      spread(0, 1, 5 / 16);
+      spread(1, 1, 1 / 16);
+    }
   }
   return indices;
 }
 
-/**
- * Assemble an animated GIF.
- * frames: array of Uint8Array palette indices (one per pixel, row-major).
- */
-export function encodeGif({ width, height, frames, palette, delayMs = 80, loop = 0 }) {
-  const colors = Math.max(2, palette.length);
-  let minCodeSize = 1;
-  while (1 << minCodeSize < colors) minCodeSize += 1;
-  minCodeSize = Math.max(2, minCodeSize);
-  const tableSize = 1 << minCodeSize;
+const MIN_CODE_SIZE = (colors) => {
+  let size = 1;
+  while (1 << size < colors) size += 1;
+  return Math.max(2, size);
+};
 
+/**
+ * Streaming GIF writer: frames are appended one at a time, so a 50 fps export
+ * never holds every indexed frame in memory at once.
+ */
+export function createGifWriter({ width, height, palette, delayMs = 80, loop = 0 }) {
+  const colors = Math.max(2, palette.length);
+  const minCodeSize = MIN_CODE_SIZE(colors);
+  const tableSize = 1 << minCodeSize;
   const writer = new ByteWriter();
+
   writer.string("GIF89a");
   writer.short(width);
   writer.short(height);
-  writer.byte(0xf0 | (minCodeSize - 1)); // global colour table of 2^minCodeSize entries
-  writer.byte(0); // background index
-  writer.byte(0); // pixel aspect ratio
+  writer.byte(0xf0 | (minCodeSize - 1));
+  writer.byte(0);
+  writer.byte(0);
   for (let i = 0; i < tableSize; i += 1) {
     const [r, g, b] = palette[i] || [0, 0, 0];
     writer.bytes([r, g, b]);
   }
-
   writer.bytes([0x21, 0xff, 0x0b]);
   writer.string("NETSCAPE2.0");
   writer.bytes([0x03, 0x01, loop & 0xff, (loop >> 8) & 0xff, 0x00]);
 
+  // GIF stores hundredths of a second; 2 cs is the floor browsers honour.
   const delay = Math.max(2, Math.round(delayMs / 10));
-  for (const indices of frames) {
-    writer.bytes([0x21, 0xf9, 0x04, 0x04]); // graphic control: disposal 1
-    writer.short(delay);
-    writer.bytes([0, 0x00]);
-    writer.byte(0x2c);
-    writer.short(0);
-    writer.short(0);
-    writer.short(width);
-    writer.short(height);
-    writer.byte(0);
-    writer.byte(minCodeSize);
-    writeSubBlocks(writer, lzwEncode(indices, minCodeSize));
-  }
-  writer.byte(0x3b);
+
+  return {
+    addFrame(indices) {
+      writer.bytes([0x21, 0xf9, 0x04, 0x04]);
+      writer.short(delay);
+      writer.bytes([0, 0x00]);
+      writer.byte(0x2c);
+      writer.short(0);
+      writer.short(0);
+      writer.short(width);
+      writer.short(height);
+      writer.byte(0);
+      writer.byte(minCodeSize);
+      writeSubBlocks(writer, lzwEncode(indices, minCodeSize));
+    },
+    finish() {
+      writer.byte(0x3b);
+      return writer.finish();
+    },
+  };
+}
+
+export function encodeGif({ width, height, frames, palette, delayMs = 80, loop = 0 }) {
+  const writer = createGifWriter({ width, height, palette, delayMs, loop });
+  for (const frame of frames) writer.addFrame(frame);
   return writer.finish();
 }

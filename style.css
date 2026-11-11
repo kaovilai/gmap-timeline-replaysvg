@@ -166,6 +166,12 @@ button.secondary {
   padding: 0.35rem 0.5rem;
 }
 
+.gif-controls .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .preview {
   margin: 0 0 1rem;
 }
