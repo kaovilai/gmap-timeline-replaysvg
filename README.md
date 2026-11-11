@@ -257,8 +257,13 @@ python3 -I -B worldmap.py gif places.json --out travel.gif \
 - 640 px / 12 fps / 24 s produces 286 frames and a ~7 MB GIF in about six
   seconds. 1080 px / 20 fps is around 30 MB.
 
-The GIF uses the same palette across frames so delta compression stays
-effective.
+The GIF uses the same palette across frames. There is little inter-frame
+saving to be had: the camera follows the route, so almost every pixel changes
+each frame and size scales with the frame count. Budget roughly 85 kB per
+720 px frame — 50 fps × 30 s is ~132 MB, past GitHub's 100 MB file limit.
+Practical long loops drop to 25 fps and 128 colours (~61 MB raw), then
+`gifsicle -O3 --lossy=80` brings a 30 s / 720 px loop to ~43 MB; that is what
+the profile-README workflow does.
 
 The browser page does the same thing without Pillow: `js/gif.js` is a small
 GIF89a encoder (median-cut palette, LZW, animation) that renders the globe from
