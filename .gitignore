@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Private Google Maps Timeline exports
+Timeline.json
+location-history.json
+Records.json
+Location History.json
+Semantic Location History/
+takeout-*.zip
+
+# Generated in the repo root by worldmap.py; commit those to the profile repo,
+# not here.
+/places.json
+/worldmap-*.svg
