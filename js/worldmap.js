@@ -325,6 +325,27 @@ export function splitJsonDocuments(text) {
   return docs;
 }
 
+/** Recognise this tool's own places.json; null for anything else. */
+export function parsePlacesDocument(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed.startsWith("{")) return null;
+  let document;
+  try {
+    document = JSON.parse(trimmed);
+  } catch {
+    return null; // concatenated per-year exports are not a single object
+  }
+  if (
+    document &&
+    document.schema === PLACES_SCHEMA &&
+    Array.isArray(document.cities) &&
+    document.cities.length
+  ) {
+    return document;
+  }
+  return null;
+}
+
 export function iterSamples(text) {
   const samples = [];
   for (const document of splitJsonDocuments(text)) {

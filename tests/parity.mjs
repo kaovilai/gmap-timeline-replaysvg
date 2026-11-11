@@ -15,6 +15,7 @@ import {
   buildPlaces,
   CityIndex,
   iterSamples,
+  parsePlacesDocument,
   renderAnimatedSvg,
   renderDriftSvg,
   renderGlobeSvg,
@@ -97,6 +98,13 @@ const serialized = JSON.stringify(document);
 for (const leaked of ["35.7796", "-78.6382", "ChIJsecret", "168.3538"]) {
   assert.ok(!serialized.includes(leaked), `leaked ${leaked}`);
 }
+
+// The tool's own output is accepted back as input; raw exports are not.
+const own = parsePlacesDocument(JSON.stringify(document));
+assert.ok(own && own.cities.length === document.cities.length);
+assert.equal(parsePlacesDocument(fixture), null);
+assert.equal(parsePlacesDocument(`${fixture}\n${fixture}`), null);
+assert.equal(parsePlacesDocument(""), null);
 
 // Concatenated per-year documents, as Android exports produce.
 const concatenated = `${fixture}\n${fixture}`;

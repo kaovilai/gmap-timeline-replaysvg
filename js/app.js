@@ -13,6 +13,7 @@ import {
   globeRing,
   haversineKm,
   iterSamples,
+  parsePlacesDocument,
   renderAnimatedSvg,
   renderDriftSvg,
   renderGlobeSvg,
@@ -222,21 +223,29 @@ async function generate(file) {
   const text = await readExport(file);
   if (!text || !text.trim()) throw new Error("The file is empty.");
 
-  setStatus("Parsing export and snapping to cities…");
-  await nextTick();
-  const samples = iterSamples(text);
-  if (!samples.length) {
-    throw new Error(
-      "No location samples found. Is this a Timeline export from the Maps app?",
-    );
+  let places = parsePlacesDocument(text);
+  let samples = [];
+  if (places) {
+    // A places.json this tool produced: dates are already baked in, so the
+    // Dates selector does not apply — render it as-is.
+    setStatus(`Drawing ${places.cities.length} cities from places.json…`);
+  } else {
+    setStatus("Parsing export and snapping to cities…");
+    await nextTick();
+    samples = iterSamples(text);
+    if (!samples.length) {
+      throw new Error(
+        "No location samples found. Is this a Timeline export from the Maps app?",
+      );
+    }
+    ({ document: places } = buildPlaces(samples, state.cities, {
+      dates: $("dates").value,
+    }));
   }
-
-  const { document: places } = buildPlaces(samples, state.cities, {
-    dates: $("dates").value,
-  });
   if (!places.cities.length) {
     throw new Error("No cities resolved from this export.");
   }
+  state.loadedFromPlaces = Boolean(samples.length === 0);
 
   setStatus(`Drawing ${places.cities.length} cities…`);
   await nextTick();
@@ -305,10 +314,12 @@ async function generate(file) {
     range = "dates removed";
   }
   const countries = new Set(places.cities.map((city) => city.country)).size;
+  const origin = samples.length
+    ? `${samples.length.toLocaleString()} samples reduced to city level.`
+    : "Loaded from places.json (city-level already).";
   $("summary").textContent =
     `${places.cities.length} cities in ${countries} countries · ${range} · ` +
-    `${samples.length.toLocaleString()} samples reduced to city level. ` +
-    `Raw coordinates are not in any file below.`;
+    `${origin} Raw coordinates are not in any file below.`;
 
   showPreview();
   $("result").hidden = false;

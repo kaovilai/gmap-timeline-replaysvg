@@ -1465,7 +1465,9 @@ def command_import(args):
     )
     if not cities:
         raise SystemExit(
-            "no cities resolved - is this a Timeline export, and is --max-city-km large enough?"
+            "no cities resolved - is this a Timeline export, and is --max-city-km "
+            "large enough? (A places.json from this tool is already city-level: "
+            "use `worldmap.py render places.json` or `worldmap.py gif places.json`.)"
         )
     write_places(
         cities,
